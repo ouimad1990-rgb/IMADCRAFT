@@ -530,4 +530,245 @@ camera.position.set(8, 12, 8);
 const renderer = new THREE.WebGLRenderer({
   antialias: false,
   powerPreference: "high-performance",
-  precision:
+  precision: "mediump"
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+scene.add(ambientLight);
+
+const sunLight = new THREE.DirectionalLight(0xfffaee, 0.85);
+sunLight.position.set(30, 50, 30);
+scene.add(sunLight);
+
+// Materials & Box Geometry
+const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+const materials = [
+  new THREE.MeshLambertMaterial({ color: 0x52b748 }), // Grass
+  new THREE.MeshLambertMaterial({ color: 0x8c5830 }), // Dirt
+  new THREE.MeshLambertMaterial({ color: 0x858585 }), // Stone
+  new THREE.MeshLambertMaterial({ color: 0x966133 }), // Wood
+  new THREE.MeshLambertMaterial({ color: 0x2e8b34 }), // Leaves
+  new THREE.MeshLambertMaterial({ color: 0xebd686 }), // Sand
+  new THREE.MeshLambertMaterial({ color: 0x33e1d6 }), // Diamond
+  new THREE.MeshLambertMaterial({ color: 0xa8e1f5, transparent: true, opacity: 0.7 }) // Glass
+];
+
+// Simple World Generation (Flat floor & random blocks)
+const worldBlocks = new Map();
+
+function createBlock(x, y, z, type) {
+  const key = `${x},${y},${z}`;
+  if (worldBlocks.has(key)) return;
+  
+  const mesh = new THREE.Mesh(boxGeo, materials[type]);
+  mesh.position.set(x, y, z);
+  scene.add(mesh);
+  worldBlocks.set(key, { mesh, type });
+}
+
+// Generate initial terrain
+for (let x = -6; x <= 6; x++) {
+  for (let z = -6; z <= 6; z++) {
+    createBlock(x, 0, z, BLOCK_TYPES.GRASS);
+    createBlock(x, -1, z, BLOCK_TYPES.DIRT);
+    createBlock(x, -2, z, BLOCK_TYPES.STONE);
+    if (Math.random() > 0.8) {
+      createBlock(x, 1, z, BLOCK_TYPES.WOOD);
+      createBlock(x, 2, z, BLOCK_TYPES.LEAVES);
+    }
+  }
+}
+
+// Player Movement & Controls state
+const moveState = { forward: 0, backward: 0, left: 0, right: 0, jump: false };
+
+document.getElementById('btn-up').addEventListener('pointerdown', () => moveState.forward = 1);
+document.getElementById('btn-up').addEventListener('pointerup', () => moveState.forward = 0);
+document.getElementById('btn-down').addEventListener('pointerdown', () => moveState.backward = 1);
+document.getElementById('btn-down').addEventListener('pointerup', () => moveState.backward = 0);
+document.getElementById('btn-left').addEventListener('pointerdown', () => moveState.left = 1);
+document.getElementById('btn-left').addEventListener('pointerup', () => moveState.left = 0);
+document.getElementById('btn-right').addEventListener('pointerdown', () => moveState.right = 1);
+document.getElementById('btn-right').addEventListener('pointerup', () => moveState.right = 0);
+document.getElementById('btn-jump').addEventListener('click', () => {
+  if (camera.position.y <= 2.1) camera.position.y += 1.5;
+});
+
+// Break and Build action buttons
+document.getElementById('btn-break').addEventListener('click', () => {
+  // Raycast forward to break block
+  const raycaster = new THREE.Raycaster();
+  const center = new THREE.Vector2(0, 0);
+  raycaster.setFromCamera(center, camera);
+  const meshes = Array.from(worldBlocks.values()).map(b => b.mesh);
+  const intersects = raycaster.intersectObjects(meshes);
+  if (intersects.length > 0) {
+    const hitMesh = intersects[0].object;
+    for (let [key, val] of worldBlocks.entries()) {
+      if (val.mesh === hitMesh) {
+        scene.remove(hitMesh);
+        worldBlocks.delete(key);
+        showToast("تم كسر المكعب!");
+        break;
+      }
+    }
+  }
+});
+
+document.getElementById('btn-build').addEventListener('click', () => {
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+  const meshes = Array.from(worldBlocks.values()).map(b => b.mesh);
+  const intersects = raycaster.intersectObjects(meshes);
+  if (intersects.length > 0) {
+    const intersect = intersects[0];
+    const pos = intersect.point.clone().add(intersect.face.normal.clone().multiplyScalar(0.5));
+    const bx = Math.round(pos.x);
+    const by = Math.round(pos.y);
+    const bz = Math.round(pos.z);
+    createBlock(bx, by, bz, selectedBlockType);
+    showToast("تم بناء المكعب!");
+  }
+});
+
+// Window resizing
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Animation Loop
+let clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+
+  const delta = clock.getDelta();
+  if (isGameStarted && pauseMenu.classList.contains('hidden')) {
+    let speed = 5 * delta;
+    if (moveState.forward) camera.position.z -= speed;
+    if (moveState.backward) camera.position.z += speed;
+    if (moveState.left) camera.position.x -= speed;
+    if (moveState.right) camera.position.x += speed;
+  }
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+})();
+</script>
+</body>
+</html>
+// UI Elements & Menus logic — IMADCRAFT 3D
+const mainMenu = document.getElementById("main-menu");
+const settingsMenu = document.getElementById("settings-menu");
+const pauseMenu = document.getElementById("pause-menu");
+
+const menuStart = document.getElementById("menu-start");
+const menuSettings = document.getElementById("menu-settings");
+const settingsBack = document.getElementById("settings-back");
+const pauseResume = document.getElementById("pause-resume");
+const pauseSettings = document.getElementById("pause-settings");
+const pauseExit = document.getElementById("pause-exit");
+const btnPause = document.getElementById("btn-pause");
+const btnSave = document.getElementById("btn-save");
+const btnCamera = document.getElementById("btn-camera");
+
+let settingsReturnTo = "main";
+
+// بدء اللعبة
+menuStart.addEventListener("click", () => {
+  mainMenu.classList.add("hidden");
+  settingsMenu.classList.add("hidden");
+  pauseMenu.classList.add("hidden");
+  isGameStarted = true;
+});
+
+// فتح إعدادات القائمة الرئيسية
+menuSettings.addEventListener("click", () => {
+  settingsReturnTo = "main";
+  mainMenu.classList.add("hidden");
+  pauseMenu.classList.add("hidden");
+  settingsMenu.classList.remove("hidden");
+});
+
+// الرجوع من الإعدادات إلى القائمة الصحيحة
+settingsBack.addEventListener("click", () => {
+  settingsMenu.classList.add("hidden");
+
+  if (settingsReturnTo === "pause" && isGameStarted) {
+    pauseMenu.classList.remove("hidden");
+  } else {
+    mainMenu.classList.remove("hidden");
+  }
+});
+
+// إيقاف مؤقت
+btnPause.addEventListener("click", () => {
+  if (!isGameStarted) {
+    showToast("ابدأ اللعبة أولاً!");
+    return;
+  }
+
+  pauseMenu.classList.remove("hidden");
+});
+
+// استئناف اللعب
+pauseResume.addEventListener("click", () => {
+  pauseMenu.classList.add("hidden");
+});
+
+// الإعدادات من قائمة الإيقاف
+pauseSettings.addEventListener("click", () => {
+  settingsReturnTo = "pause";
+  pauseMenu.classList.add("hidden");
+  settingsMenu.classList.remove("hidden");
+});
+
+// العودة للقائمة الرئيسية
+pauseExit.addEventListener("click", () => {
+  pauseMenu.classList.add("hidden");
+  settingsMenu.classList.add("hidden");
+  mainMenu.classList.remove("hidden");
+  isGameStarted = false;
+
+  // إيقاف أي حركة مستمرة للأزرار
+  moveState.forward = 0;
+  moveState.backward = 0;
+  moveState.left = 0;
+  moveState.right = 0;
+  moveState.jump = false;
+});
+
+// حفظ العالم محليًا على الجهاز
+btnSave.addEventListener("click", () => {
+  try {
+    const saveData = {
+      blocks: Array.from(worldBlocks.entries()).map(([key, block]) => ({
+        key,
+        type: block.type
+      })),
+      selectedBlockType
+    };
+
+    localStorage.setItem("IMADCRAFT_SAVE", JSON.stringify(saveData));
+    showToast("تم حفظ بيانات العالم بنجاح!");
+  } catch (error) {
+    showToast("تعذر الحفظ على هذا الجهاز!");
+  }
+});
+
+// تبديل نص المنظور فقط — لا نغيّر الكاميرا
+btnCamera.addEventListener("click", () => {
+  cameraMode = (cameraMode + 1) % 2;
+
+  btnCamera.textContent = cameraMode === 0
+    ? "👤 المنظور: الأول"
+    : "👤 المنظور: الثالث";
+});
