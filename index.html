@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>IMADCRAFT 3D</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#87ceeb;font-family:Arial;touch-action:none}
+canvas{display:block}
+#top{position:fixed;top:10px;left:0;right:0;text-align:center;color:white;font-weight:bold;font-size:24px;text-shadow:2px 2px 4px #000;pointer-events:none}
+#info{position:fixed;top:48px;left:0;right:0;text-align:center;color:white;text-shadow:1px 1px 3px #000;font-size:12px;pointer-events:none}
+#controls{position:fixed;bottom:18px;left:0;right:0;display:flex;justify-content:space-between;padding:0 16px;align-items:end}
+.group{display:grid;grid-template-columns:repeat(3,54px);gap:5px}
+button{border:2px solid #ffffff88;background:#182b37bb;color:white;border-radius:12px;font-size:21px;font-weight:bold;width:54px;height:54px;touch-action:none}
+button:active{background:#46a049}
+.actions{display:flex;flex-direction:column;gap:8px}
+.actions button{width:65px;height:53px;font-size:13px}
+#cross{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);color:white;font-size:26px;text-shadow:1px 1px 2px black;pointer-events:none}
+#tip{position:fixed;bottom:145px;left:0;right:0;text-align:center;color:white;text-shadow:1px 1px 3px black;font-size:12px;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="top">IMADCRAFT</div>
+<div id="info">3D BLOCK WORLD</div>
+<div id="cross">+</div>
+<div id="tip">حرّك اللاعب بالأزرار واستكشف العالم</div>
+
+<div id="controls">
+  <div class="group">
+    <span></span><button id="up">▲</button><span></span>
+    <button id="left">◀</button><button id="down">▼</button><button id="right">▶</button>
+  </div>
+  <div class="actions">
+    <button id="jump">قفز ⬆</button>
+    <button id="break">كسر ⛏</button>
+    <button id="build">بناء 🧱</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+(() => {
+"use strict";
+
+if (!window.THREE) {
+  document.getElementById("info").textContent =
+    "تعذّر تحميل محرك 3D. افتح اللعبة مع اتصال بالإنترنت.";
+  return;
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 17, 38);
+
+const camera = new THREE.PerspectiveCamera(
+  70, innerWidth / innerHeight, 0.1, 60
+);
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  powerPreference: "low-power"
+});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = false;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x65734b, 2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(8, 15, 7);
+scene.add(sun);
+
+const materials = [
+  new THREE.MeshLambertMaterial({color:0x58ad45}),
+  new THREE.MeshLambertMaterial({color:0x806044}),
+  new THREE.MeshLambertMaterial({color:0x888888}),
+  new THREE.MeshLambertMaterial({color:0xe0c16b}),
+  new THREE.MeshLambertMaterial({color:0x79502d})
+];
+
+const geo = new THREE.BoxGeometry(1,1,1);
+const blocks = new Map();
+const blockMeshes = [];
+const key = (x,y,z) => `${x},${y},${z}`;
+
+function addBlock(x,y,z,type=0) {
+  const k=key(x,y,z);
+  if(blocks.has(k)) return;
+  const mesh=new THREE.Mesh(geo,materials[type]);
+  mesh.position.set(x,y,z);
+  mesh.userData={x,y,z,type};
+  scene.add(mesh);
+  blocks.set(k,mesh);
+  blockMeshes.push(mesh);
+}
+
+function removeBlock(mesh) {
+  const {x,y,z}=mesh.userData;
+  blocks.delete(key(x,y,z));
+  scene.remove(mesh);
+  const i=blockMeshes.indexOf(mesh);
+  if(i>=0) blockMeshes.splice(i,1);
+}
+
+// عالم محدود لتقليل استهلاك الذاكرة والمعالجة
+for(let x=-10;x<=10;x++){
+  for(let z=-10;z<=10;z++){
+    addBlock(x,-1,z,1);
+    const r=Math.sin(x*12.3+z*5.7);
+    if(r>0.78 && Math.abs(x)+Math.abs(z)>4){
+      addBlock(x,0,z,0);
+    }
+  }
+}
+
+// أشجار بسيطة
+for(const [x,z] of [[-5,-4],[5,-6],[7,4],[-7,5],[2,8]]){
+  addBlock(x,0,z,1);
+  addBlock(x,1,z,1);
+  addBlock(x,2,z,0);
+  addBlock(x+1,2,z,0);
+  addBlock(x-1,2,z,0);
+  addBlock(x,2,z+1,0);
+  addBlock(x,2,z-1,0);
+}
+
+const player={
+  x:0,y:0.9,z:3,
+  vy:0,
+  grounded:true
+};
+
+const direction={up:false,down:false,left:false,right:false};
+const speed=4.5;
+let last=performance.now();
+let actionLock=false;
+
+function bindHold(id,name){
+  const el=document.getElementById(id);
+  const start=e=>{e.preventDefault();direction[name]=true};
+  const stop=e=>{e.preventDefault();direction[name]=false};
+  el.addEventListener("pointerdown",start);
+  el.addEventListener("pointerup",stop);
+  el.addEventListener("pointercancel",stop);
+  el.addEventListener("lostpointercapture",()=>direction[name]=false);
+  el.addEventListener("contextmenu",e=>e.preventDefault());
+}
+bindHold("up","up");
+bindHold("down","down");
+bindHold("left","left");
+bindHold("right","right");
+
+document.getElementById("jump").addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  if(player.grounded){
+    player.vy=7;
+    player.grounded=false;
+  }
+});
+
+const raycaster=new THREE.Raycaster();
+const center=new THREE.Vector2(0,0);
+
+function targetBlock(){
+  raycaster.setFromCamera(center,camera);
+  const hits=raycaster.intersectObjects(blockMeshes,false);
+  return hits.length && hits[0].distance<5 ? hits[0] : null;
+}
+
+document.getElementById("break").addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  const hit=targetBlock();
+  if(hit && hit.object.userData.y>=0) removeBlock(hit.object);
+});
+
+document.getElementById("build").addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  const hit=targetBlock();
+  if(!hit) return;
+  const p=hit.object.position.clone().add(hit.face.normal);
+  const x=Math.round(p.x),y=Math.round(p.y),z=Math.round(p.z);
+  if(y<0 || y>8 || Math.hypot(x-player.x,z-player.z)<1.2) return;
+  addBlock(x,y,z,Math.floor(Math.random()*3));
+});
+
+// تدوير الكاميرا بالسحب على الشاشة
+let dragging=false,px=0,py=0;
+let yaw=0,pitch=-0.18;
+renderer.domElement.addEventListener("pointerdown",e=>{
+  dragging=true;px=e.clientX;py=e.clientY;
+});
+window.addEventListener("pointerup",()=>dragging=false);
+window.addEventListener("pointermove",e=>{
+  if(!dragging) return;
+  const dx=e.clientX-px,dy=e.clientY-py;
+  px=e.clientX;py=e.clientY;
+  yaw-=dx*0.006;
+  pitch=Math.max(-1.1,Math.min(0.7,pitch-dy*0.004));
+});
+
+function update(dt){
+  let dx=0,dz=0;
+  if(direction.up) dz-=1;
+  if(direction.down) dz+=1;
+  if(direction.left) dx-=1;
+  if(direction.right) dx+=1;
+
+  const len=Math.hypot(dx,dz);
+  if(len){
+    dx/=len;dz/=len;
+    const wx=dx*Math.cos(yaw)+dz*Math.sin(yaw);
+    const wz=-dx*Math.sin(yaw)+dz*Math.cos(yaw);
+    const nx=player.x+wx*speed*dt;
+    const nz=player.z+wz*speed*dt;
+
+    if(Math.abs(nx)<10) player.x=nx;
+    if(Math.abs(nz)<10) player.z=nz;
+  }
+
+  player.vy-=18*dt;
+  player.y+=player.vy*dt;
+  if(player.y<=0.9){
+    player.y=0.9;
+    player.vy=0;
+    player.grounded=true;
+  }
+
+  camera.position.set(
+    player.x-Math.sin(yaw)*5,
+    player.y+2.5+Math.sin(pitch)*2,
+    player.z+Math.cos(yaw)*5
+  );
+  camera.lookAt(
+    player.x,
+    player.y+0.7,
+    player.z
+  );
+
+  document.getElementById("info").textContent=
+    `العالم: ${blocks.size} مكعب | IMADCRAFT 3D`;
+}
+
+function animate(now){
+  requestAnimationFrame(animate);
+  const dt=Math.min((now-last)/1000,0.035);
+  last=now;
+  update(dt);
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+
+window.addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));
+  renderer.setSize(innerWidth,innerHeight);
+});
+})();
+</script>
+</body>
+</html>
