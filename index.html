@@ -185,7 +185,7 @@ document.getElementById("build").addEventListener("pointerdown",e=>{
 });
 
 // تدوير الكاميرا بالسحب على الشاشة
-let dragging=false,px=0,py=0;
+
 let yaw=0,pitch=-0.18;
 renderer.domElement.addEventListener("pointerdown",e=>{
   dragging=true;px=e.clientX;py=e.clientY;
@@ -198,7 +198,42 @@ window.addEventListener("pointermove",e=>{
   yaw-=dx*0.006;
   pitch=Math.max(-1.1,Math.min(0.7,pitch-dy*0.004));
 });
+let dragging = false;
+let px = 0, py = 0;
+let yaw = 0, pitch = -0.18;
 
+renderer.domElement.style.touchAction = "none";
+
+renderer.domElement.addEventListener("pointerdown", e => {
+  dragging = true;
+  px = e.clientX;
+  py = e.clientY;
+  renderer.domElement.setPointerCapture(e.pointerId);
+});
+
+renderer.domElement.addEventListener("pointermove", e => {
+  if (!dragging) return;
+
+  const dx = e.clientX - px;
+  const dy = e.clientY - py;
+
+  px = e.clientX;
+  py = e.clientY;
+
+  yaw -= dx * 0.008;
+  pitch = Math.max(
+    -0.8,
+    Math.min(0.5, pitch - dy * 0.006)
+  );
+});
+
+renderer.domElement.addEventListener("pointerup", () => {
+  dragging = false;
+});
+
+renderer.domElement.addEventListener("pointercancel", () => {
+  dragging = false;
+});
 function update(dt){
   let dx=0,dz=0;
   if(direction.up) dz-=1;
