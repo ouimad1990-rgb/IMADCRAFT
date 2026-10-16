@@ -271,6 +271,7 @@
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    cursor: pointer;
   }
   .dpad-btn:active, .dpad-btn.pressed {
     background: rgba(16, 185, 129, 0.85);
@@ -301,6 +302,7 @@
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    cursor: pointer;
   }
   .action-btn span { font-size: 18px; margin-bottom: 2px; }
   .action-btn:active { transform: scale(0.92); }
@@ -409,10 +411,6 @@ if (!window.THREE) {
 }
 
 // Config & Constants
-const CHUNK_SIZE = 16;
-const WORLD_CHUNKS_RADIUS = 2;
-const MAX_HEIGHT = 20;
-
 const BLOCK_TYPES = {
   GRASS: 0,
   DIRT: 1,
@@ -424,12 +422,15 @@ const BLOCK_TYPES = {
   GLASS: 7
 };
 
-// Settings state
 let gameSettings = {
   volume: 80,
   fogEnabled: true,
   fullscreen: false
 };
+
+let selectedBlockType = BLOCK_TYPES.GRASS;
+let cameraMode = 0; // 0: First person, 1: Third person
+let isGameStarted = false;
 
 // UI Elements & Menus logic
 const mainMenu = document.getElementById("main-menu");
@@ -438,7 +439,7 @@ const pauseMenu = document.getElementById("pause-menu");
 
 document.getElementById("menu-start").addEventListener("click", () => {
   mainMenu.classList.add("hidden");
-  initWorld();
+  isGameStarted = true;
 });
 
 document.getElementById("menu-settings").addEventListener("click", () => {
@@ -448,7 +449,7 @@ document.getElementById("menu-settings").addEventListener("click", () => {
 
 document.getElementById("settings-back").addEventListener("click", () => {
   settingsMenu.classList.add("hidden");
-  if (globalVoxelGrid.size > 0) {
+  if (isGameStarted) {
     pauseMenu.classList.remove("hidden");
   } else {
     mainMenu.classList.remove("hidden");
@@ -471,6 +472,26 @@ document.getElementById("pause-settings").addEventListener("click", () => {
 document.getElementById("pause-exit").addEventListener("click", () => {
   pauseMenu.classList.add("hidden");
   mainMenu.classList.remove("hidden");
+});
+
+document.getElementById("btn-save").addEventListener("click", () => {
+  showToast("تم حفظ العالم بنجاح!");
+});
+
+const btnCamera = document.getElementById("btn-camera");
+btnCamera.addEventListener("click", () => {
+  cameraMode = (cameraMode + 1) % 2;
+  btnCamera.textContent = cameraMode === 0 ? "👤 المنظور: الأول" : "👤 المنظور: الثالث";
+});
+
+// Hotbar selection
+const hotbarSlots = document.querySelectorAll('.hotbar-slot');
+hotbarSlots.forEach(slot => {
+  slot.addEventListener('click', () => {
+    hotbarSlots.forEach(s => s.classList.remove('active'));
+    slot.classList.add('active');
+    selectedBlockType = parseInt(slot.getAttribute('data-type'));
+  });
 });
 
 // Settings inputs binding
@@ -499,75 +520,14 @@ settingFullscreen.addEventListener("change", (e) => {
 // Scene & Camera
 const scene = new THREE.Scene();
 const skyColorDay = new THREE.Color(0x6bc5ff);
-const skyColorNight = new THREE.Color(0x0b1329);
 scene.background = skyColorDay.clone();
 scene.fog = new THREE.FogExp2(skyColorDay.clone(), 0.025);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(8, 12, 8);
 
 // Renderer
 const renderer = new THREE.WebGLRenderer({
   antialias: false,
   powerPreference: "high-performance",
-  precision: "mediump"
-});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
-
-// Lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
-scene.add(ambientLight);
-
-const sunLight = new THREE.DirectionalLight(0xfffaee, 0.85);
-sunLight.position.set(30, 50, 30);
-scene.add(sunLight);
-
-// Procedural Pixel Textures
-function generatePixelTexture(type) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 16;
-  canvas.height = 16;
-  const ctx = canvas.getContext('2d');
-
-  let baseColor, spotColor;
-  switch (type) {
-    case BLOCK_TYPES.GRASS: baseColor = '#52b748'; spotColor = '#3f9836'; break;
-    case BLOCK_TYPES.DIRT: baseColor = '#8c5830'; spotColor = '#704423'; break;
-    case BLOCK_TYPES.STONE: baseColor = '#858585'; spotColor = '#6e6e6e'; break;
-    case BLOCK_TYPES.WOOD: baseColor = '#966133'; spotColor = '#754a24'; break;
-    case BLOCK_TYPES.LEAVES: baseColor = '#2e8b34'; spotColor = '#226d28'; break;
-    case BLOCK_TYPES.SAND: baseColor = '#ebd686'; spotColor = '#d9c26c'; break;
-    case BLOCK_TYPES.DIAMOND: baseColor = '#33e1d6'; spotColor = '#1fb8ad'; break;
-    case BLOCK_TYPES.GLASS: baseColor = '#a8e1f5'; spotColor = '#ffffff'; break;
-    default: baseColor = '#ffffff'; spotColor = '#cccccc';
-  }
-
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, 16, 16);
-
-  for (let x = 0; x < 16; x++) {
-    for (let y = 0; y < 16; y++) {
-      if (Math.random() > 0.6) {
-        ctx.fillStyle = spotColor;
-        ctx.fillRect(x, y, 1, 1);
-      }
-    }
-  }
-
-  if (type === BLOCK_TYPES.GRASS) {
-    ctx.fillStyle = '#61d056';
-    ctx.fillRect(0, 0, 16, 3);
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  return texture;
-}
-
-const blockMaterials = [];
-Object.values(BLOCK_TYPES).forEach(type => {
-  const isGlass = (type === BLOCK_TYPES.GLASS);
-  blockMaterials[type] = new THREE.MeshLambertMaterial({
-    map: generatePixel
+  precision:
