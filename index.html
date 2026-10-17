@@ -8,12 +8,13 @@ const CHUNK_SIZE = 16;
 const WORLD_HEIGHT = 40;
 const AIR = 255;
 
-const BLOCK = { GRASS: 0, DIRT: 1, STONE: 2, WOOD: 3, LEAVES: 4, SAND: 5, DIAMOND: 6, GLASS: 7 };
+const BLOCK = { GRASS: 0, DIRT: 1, STONE: 2, WOOD: 3, LEAVES: 4, SAND: 5, DIAMOND: 6, GLASS: 7, BEDROCK: 8 };
+// ✅ إصلاح #7: بلوك bedrock حقيقي
 
 const blockColors = {
   [BLOCK.GRASS]: 0x52b748, [BLOCK.DIRT]: 0x8c5830, [BLOCK.STONE]: 0x858585,
   [BLOCK.WOOD]: 0x966133, [BLOCK.LEAVES]: 0x2e8b34, [BLOCK.SAND]: 0xebd686,
-  [BLOCK.DIAMOND]: 0x33e1d6, [BLOCK.GLASS]: 0xa8e1f5,
+  [BLOCK.DIAMOND]: 0x33e1d6, [BLOCK.GLASS]: 0xa8e1f5, [BLOCK.BEDROCK]: 0x1a1a1a,
 };
 
 const PLAYER = { width: 0.6, height: 1.8, eye: 1.62, gravity: 26, jumpVel: 8.2, baseSpeed: 5.0 };
@@ -103,8 +104,14 @@ function setBlockAt(x, y, z, type) {
   chunk.set(c.lx, y, c.lz, type);
   if (!chunkMods.has(key)) chunkMods.set(key, new Map());
   chunkMods.get(key).set(`${c.lx},${y},${c.lz}`, type);
-  hasUnsavedChanges = true;               // ✅ تتبع التعديلات
+  hasUnsavedChanges = true;
   rebuildChunk(chunk);
+
+  // ✅ إصلاح #4: أعد بناء القطع المجاورة عند تعديل بلوك على الحدود
+  if (c.lx === 0) { const nb = chunks.get(`${c.cx-1},${c.cz}`); if (nb) rebuildChunk(nb); }
+  if (c.lx === CHUNK_SIZE-1) { const nb = chunks.get(`${c.cx+1},${c.cz}`); if (nb) rebuildChunk(nb); }
+  if (c.lz === 0) { const nb = chunks.get(`${c.cx},${c.cz-1}`); if (nb) rebuildChunk(nb); }
+  if (c.lz === CHUNK_SIZE-1) { const nb = chunks.get(`${c.cx},${c.cz+1}`); if (nb) rebuildChunk(nb); }
   return true;
 }
 
@@ -116,11 +123,14 @@ function generateChunk(chunk) {
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
       const wx = baseX + lx, wz = baseZ + lz;
       const h = clamp(terrainHeight(wx, wz), 1, WORLD_HEIGHT - 6);
-      for (let y = 0; y <= h; y++) {
+      // ✅ إصلاح #7: طبقة bedrock صلبة في y=0
+      chunk.set(lx, 0, lz, BLOCK.BEDROCK);
+      for (let y = 1; y <= h; y++) {
         let t;
         if (y === h) t = (h < 13) ? BLOCK.SAND : BLOCK.GRASS;
         else if (y >= h - 2) t = (h < 13) ? BLOCK.SAND : BLOCK.DIRT;
         else t = BLOCK.STONE;
+        if (y < 4 && hash(wx*3 + y, wz*3) > 0.97) t = BLOCK.DIAMOND;
         chunk.set(lx, y, lz, t);
       }
       if (h > 13 && h < WORLD_HEIGHT - 8 && lx >= 3 && lx <= 12 && lz >= 3 && lz <= 12) {
@@ -140,6 +150,7 @@ function generateChunk(chunk) {
       }
     }
   }
+  // تطبيق التعديلات المحفوظة على هذه القطعة
   const key = `${chunk.cx},${chunk.cz}`;
   const mods = chunkMods.get(key);
   if (mods) for (const [bkey, t] of mods) {
@@ -159,11 +170,16 @@ Object.keys(blockColors).forEach(type => {
   });
 });
 
+// ✅ إصلاح #3: افحص البلوكات المجاورة عبر حدود القطع (يمنع z-fighting)
 function isExposedInChunk(chunk, lx, ly, lz) {
-  if (ly===0||ly===WORLD_HEIGHT-1||lx===0||lx===CHUNK_SIZE-1||lz===0||lz===CHUNK_SIZE-1) return true;
-  return chunk.get(lx+1,ly,lz)===AIR || chunk.get(lx-1,ly,lz)===AIR ||
-         chunk.get(lx,ly+1,lz)===AIR || chunk.get(lx,ly-1,lz)===AIR ||
-         chunk.get(lx,ly,lz+1)===AIR || chunk.get(lx,ly,lz-1)===AIR;
+  const wx = chunk.cx * CHUNK_SIZE + lx;
+  const wz = chunk.cz * CHUNK_SIZE + lz;
+  return !isSolid(getBlockAt(wx+1, ly, wz)) ||
+         !isSolid(getBlockAt(wx-1, ly, wz)) ||
+         !isSolid(getBlockAt(wx, ly+1, wz)) ||
+         !isSolid(getBlockAt(wx, ly-1, wz)) ||
+         !isSolid(getBlockAt(wx, ly, wz+1)) ||
+         !isSolid(getBlockAt(wx, ly, wz-1));
 }
 
 const _m4 = new THREE.Matrix4();
@@ -185,7 +201,8 @@ function rebuildChunk(chunk) {
 
   const baseX = chunk.cx * CHUNK_SIZE, baseZ = chunk.cz * CHUNK_SIZE;
   for (const tStr in groups) {
-    const t = parseInt(tStr), list = groups[tStr];
+    const list = groups[tStr];
+    if (!materials[tStr]) continue;
     const mesh = new THREE.InstancedMesh(boxGeo, materials[tStr], list.length);
     mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
     for (let i = 0; i < list.length; i++) {
@@ -197,11 +214,19 @@ function rebuildChunk(chunk) {
     mesh.frustumCulled = true;
     scene.add(mesh);
     chunk.meshes.push(mesh);
-    chunk.instanced[t] = mesh;
+    chunk.instanced[tStr] = mesh;
   }
 }
 
 /* ==================== CHUNK MGMT ==================== */
+function rebuildChunkNeighbors(cx, cz) {
+  // ✅ إصلاح #3 (تكملة): عند تحميل قطعة جديدة، أعد بناء جيرانها
+  for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+    const nb = chunks.get(`${cx+dx},${cz+dz}`);
+    if (nb) rebuildChunk(nb);
+  }
+}
+
 function requestChunksAround(px, pz) {
   const pcx = Math.floor(px/CHUNK_SIZE), pcz = Math.floor(pz/CHUNK_SIZE);
   const R = gameSettings.renderDistance;
@@ -229,6 +254,7 @@ function processGenQueue(budgetMs) {
     const chunk = new Chunk(item.cx, item.cz);
     generateChunk(chunk); rebuildChunk(chunk);
     chunks.set(item.key, chunk);
+    rebuildChunkNeighbors(item.cx, item.cz);
   }
 }
 function forceGenerateChunk(cx, cz) {
@@ -237,6 +263,7 @@ function forceGenerateChunk(cx, cz) {
   const chunk = new Chunk(cx, cz);
   generateChunk(chunk); rebuildChunk(chunk);
   chunks.set(key, chunk);
+  rebuildChunkNeighbors(cx, cz);
 }
 
 /* ==================== THREE SETUP ==================== */
@@ -263,7 +290,7 @@ scene.add(backLight);
 function applyFog() {
   if (gameSettings.fog) {
     const dist = gameSettings.renderDistance * CHUNK_SIZE;
-    scene.fog = new THREE.Fog(skyColorDay.clone(), dist*0.55, dist*1.05);
+    scene.fog = new THREE.Fog(skyColorDay, dist*0.55, dist*1.05);
   } else scene.fog = null;
 }
 applyFog();
@@ -344,22 +371,24 @@ function updateCamera() {
     camera.rotation.x = pitch;
     camera.rotation.z = 0;
   } else {
+    // ✅ إصلاح #5: كاميرا الشخص الثالث تتبع اتجاه النظر بشكل صحيح
     const dist = 4.5;
-    const backX = Math.sin(yaw)*dist, backZ = Math.cos(yaw)*dist;
-    const up = Math.sin(pitch)*dist;
+    const cosP = Math.cos(pitch);
+    const backX = Math.sin(yaw) * dist * cosP;
+    const backZ = Math.cos(yaw) * dist * cosP;
+    const backY = Math.sin(pitch) * dist;
     let cx = player.pos.x + backX;
-    let cy = eyeY + 1.2 + up*0.5;
+    let cy = eyeY - backY + 0.3;
     let cz = player.pos.z + backZ;
     const origin = new THREE.Vector3(player.pos.x, eyeY, player.pos.z);
     const dir = new THREE.Vector3(cx-origin.x, cy-origin.y, cz-origin.z);
     const distFull = dir.length();
-    dir.normalize();
-    const hit = raycastVoxel(origin, dir, distFull);
-    if (hit) {
-      const hitDist = Math.sqrt((hit.px-origin.x)**2 + (hit.py-origin.y)**2 + (hit.pz-origin.z)**2);
-      if (hitDist < distFull) {
-        const safe = Math.max(0.5, hitDist - 0.3);
-        const t = safe / distFull;
+    if (distFull > 0.001) {
+      dir.normalize();
+      const hit = raycastVoxel(origin, dir, distFull);
+      if (hit) {
+        const safe = Math.max(0.5, hit.dist - 0.3);
+        // ✅ إصلاح #6: إزالة الكود الميت `const t = safe / distFull`
         cx = origin.x + dir.x * safe;
         cy = origin.y + dir.y * safe;
         cz = origin.z + dir.z * safe;
@@ -401,10 +430,14 @@ function breakBlock() {
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
   const hit = raycastVoxel(camera.position, dir, 6);
-  if (hit && hit.y > 0) {
-    setBlockAt(hit.x, hit.y, hit.z, AIR);
-    showToast("⛏ تم كسر المكعب");
-  } else if (!hit) showToast("لا يوجد مكعب أمامك");
+  if (!hit) { showToast("لا يوجد مكعب أمامك"); return; }
+  // ✅ إصلاح #7: bedrock لا يُكسر
+  if (getBlockAt(hit.x, hit.y, hit.z) === BLOCK.BEDROCK) {
+    showToast("⛔ هذه طبقة أساسية لا تُكسر");
+    return;
+  }
+  setBlockAt(hit.x, hit.y, hit.z, AIR);
+  showToast("⛏ تم كسر المكعب");
 }
 function buildBlock() {
   if (!isGameStarted || isPaused()) return;
@@ -447,6 +480,8 @@ function saveWorld() {
     showToast("💾 تم حفظ العالم");
   } catch (e) { showToast("تعذر الحفظ"); }
 }
+
+// ✅ إصلاح #1 و #2: لا يوجد forceGenerateChunk قبل loadWorld، وتُطبَّق التعديلات على القطع الموجودة
 function loadWorld() {
   try {
     const raw = localStorage.getItem("IMADCRAFT_SAVE_V2");
@@ -464,6 +499,17 @@ function loadWorld() {
         const m = new Map();
         for (const bkey in data.mods[ckey]) m.set(bkey, data.mods[ckey][bkey]);
         chunkMods.set(ckey, m);
+      }
+    }
+    // ✅ إصلاح #2: طبّق التعديلات على القطع الموجودة مسبقاً
+    for (const [ckey, mods] of chunkMods) {
+      const chunk = chunks.get(ckey);
+      if (chunk) {
+        for (const [bkey, t] of mods) {
+          const [lx, ly, lz] = bkey.split(',').map(Number);
+          chunk.set(lx, ly, lz, t);
+        }
+        rebuildChunk(chunk);
       }
     }
     return true;
@@ -783,10 +829,10 @@ function animate() {
 
 /* ==================== BOOT ==================== */
 if (!window.THREE) { alert("تعذر تحميل Three.js"); return; }
-forceGenerateChunk(0, 0); forceGenerateChunk(0, 1);
-forceGenerateChunk(1, 0); forceGenerateChunk(1, 1);
+// ✅ إصلاح #1: تم إزالة forceGenerateChunk قبل loadWorld
+// التوليد يحدث الآن داخل startGame بعد loadWorld
 updateCamera();
 animate();
 
 })();
-</script>
+  </script>
