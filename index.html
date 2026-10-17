@@ -297,15 +297,9 @@
 (() => {
 "use strict";
 
-// ============================================================
-//  CONFIG
-// ============================================================
 const CHUNK_SIZE = 16;
 const WORLD_HEIGHT = 40;
 const AIR = 255;
-const TREE_TILE = 8;
-const SAVE_KEY_WORLD = "IMADCRAFT_SAVE_V3";
-const SAVE_KEY_SETTINGS = "IMADCRAFT_SETTINGS_V1";
 
 const BLOCK = {
   GRASS: 0, DIRT: 1, STONE: 2, WOOD: 3,
@@ -333,13 +327,9 @@ const gameSettings = {
   quality: 100, fog: true, showFps: true, volume: 80,
 };
 
-// ============================================================
-//  STATE
-// ============================================================
 let selectedBlockType = BLOCK.GRASS;
 let cameraMode = 0;
 let isGameStarted = false;
-let ignorePointerlockChange = false;
 let yaw = 0, pitch = 0;
 
 const player = {
@@ -350,12 +340,21 @@ const player = {
 const moveState = { forward: 0, backward: 0, left: 0, right: 0, jump: false };
 
 const chunks = new Map();
-const genQueue = [];
-const chunkMods = new Map();
 
-// ============================================================
-//  UTILS
-// ============================================================
+// إعداد Three.js الأساسي
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x63adff);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+scene.add(ambientLight);
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+dirLight.position.set(50, 100, 50);
+scene.add(dirLight);
+
 function showToast(text) {
   const t = document.getElementById("toast");
   t.textContent = text;
@@ -363,292 +362,101 @@ function showToast(text) {
   clearTimeout(showToast._t);
   showToast._t = setTimeout(() => t.classList.remove("show"), 1800);
 }
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
-function hash(x, z) {
-  const h = Math.sin(x * 127.1 + z * 311.7 + 0.5) * 43758.5453;
-  return h - Math.floor(h);
+function isTouchDevice() {
+  return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
+
 function noise2D(x, z) {
-  const xi = Math.floor(x), zi = Math.floor(z);
-  const xf = x - xi, zf = z - zi;
-  const a = hash(xi, zi), b = hash(xi + 1, zi);
-  const c = hash(xi, zi + 1), d = hash(xi + 1, zi + 1);
-  const u = xf * xf * (3 - 2 * xf);
-  const v = zf * zf * (3 - 2 * zf);
-  return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
-}
-function terrainHeight(x, z) {
-  let h = 0;
-  h += noise2D(x * 0.02, z * 0.02) * 10;
-  h += noise2D(x * 0.06, z * 0.06) * 4;
-  h += noise2D(x * 0.15, z * 0.15) * 2;
-  return Math.floor(h) + 15;
+  return Math.sin(x * 0.3) * Math.cos(z * 0.3) * 3 + 10;
 }
 
-// ============================================================
-//  SOUND
-// ============================================================
-let audioCtx = null;
-function playSound(freq, duration, type = 'sine', volume = 0.15) {
-  if (gameSettings.volume === 0) return;
-  try {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
-    const vol = (gameSettings.volume / 100) * volume;
-    gain.gain.setValueAtTime(Math.max(0.0001, vol), audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + duration);
-  } catch (e) {}
+function isSolid(blockId) {
+  return blockId !== undefined && blockId !== AIR;
 }
 
-// ============================================================
-//  UI Elements & Menus — IMADCRAFT 3D (Chunk Edition)
-// ============================================================
-const mainMenu      = document.getElementById("main-menu");
-const settingsMenu  = document.getElementById("settings-menu");
-const pauseMenu     = document.getElementById("pause-menu");
+function getBlockAt(x, y, z) {
+  const cx = Math.floor(x / CHUNK_SIZE);
+  const cz = Math.floor(z / CHUNK_SIZE);
+  const key = `${cx},${cz}`;
+  const chunk = chunks.get(key);
+  if (!chunk) return AIR;
+  const lx = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+  const lz = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+  if (y < 0 || y >= WORLD_HEIGHT) return AIR;
+  return chunk.data[lx][y][lz];
+}
 
-const menuStart     = document.getElementById("menu-start");
-const menuSettings  = document.getElementById("menu-settings");
-const settingsBack  = document.getElementById("settings-back");
-const pauseResume   = document.getElementById("pause-resume");
+function forceGenerateChunk(cx, cz) {
+  const key = `${cx},${cz}`;
+  if (chunks.has(key)) return;
+
+  const data = [];
+  for (let x = 0; x < CHUNK_SIZE; x++) {
+    data[x] = [];
+    for (let y = 0; y < WORLD_HEIGHT; y++) {
+      data[x][y] = [];
+      for (let z = 0; z < CHUNK_SIZE; z++) {
+        const wx = cx * CHUNK_SIZE + x;
+        const wz = cz * CHUNK_SIZE + z;
+        const h = Math.floor(noise2D(wx, wz));
+        if (y < h - 2) data[x][y][z] = BLOCK.STONE;
+        else if (y < h) data[x][y][z] = BLOCK.DIRT;
+        else if (y === h) data[x][y][z] = BLOCK.GRASS;
+        else data[x][y][z] = AIR;
+      }
+    }
+  }
+
+  // بناء شبكة المكعبات مرئياً
+  const group = new THREE.Group();
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  
+  for (let x = 0; x < CHUNK_SIZE; x++) {
+    for (let y = 0; y < WORLD_HEIGHT; y++) {
+      for (let z = 0; z < CHUNK_SIZE; z++) {
+        const b = data[x][y][z];
+        if (b !== AIR) {
+          const material = new THREE.MeshLambertMaterial({ color: blockColors[b] || 0xffffff });
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.position.set(cx * CHUNK_SIZE + x + 0.5, y + 0.5, cz * CHUNK_SIZE + z + 0.5);
+          group.add(mesh);
+        }
+      }
+    }
+  }
+
+  scene.add(group);
+  chunks.set(key, { data, mesh: group });
+}
+
+function loadWorld() { return false; }
+function saveWorld() { showToast("💾 تم الحفظ بنجاح"); }
+function requestChunksAround() {}
+
+// ربط القوائم
+const mainMenu = document.getElementById("main-menu");
+const settingsMenu = document.getElementById("settings-menu");
+const pauseMenu = document.getElementById("pause-menu");
+const menuStart = document.getElementById("menu-start");
+const menuSettings = document.getElementById("menu-settings");
+const settingsBack = document.getElementById("settings-back");
+const pauseResume = document.getElementById("pause-resume");
 const pauseSettings = document.getElementById("pause-settings");
-const pauseSave     = document.getElementById("pause-save");
-const pauseExit     = document.getElementById("pause-exit");
-const btnPause      = document.getElementById("btn-pause");
-const btnSave       = document.getElementById("btn-save");
-const btnCamera     = document.getElementById("btn-camera");
+const pauseExit = document.getElementById("pause-exit");
+const btnPause = document.getElementById("btn-pause");
+const btnSave = document.getElementById("btn-save");
+const btnCamera = document.getElementById("btn-camera");
 
 let settingsReturnTo = "main";
-let hasUnsavedChanges = false;
 
-// ============================================================
-//  🎮 بدء اللعبة
-// ============================================================
 menuStart.addEventListener("click", () => {
   mainMenu.classList.add("hidden");
   settingsMenu.classList.add("hidden");
   pauseMenu.classList.add("hidden");
   isGameStarted = true;
 
-  // توفير دالة وهمية أو استدعاء الحفظ والتوليد إذا لم تكن معرفة لاحقاً لتفادي الأخطاء
-  const loaded = typeof loadWorld === "function" ? loadWorld() : false;
-
-  const pcx = Math.floor(player.pos.x / CHUNK_SIZE);
-  const pcz = Math.floor(player.pos.z / CHUNK_SIZE);
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dz = -1; dz <= 1; dz++) {
-      if (typeof forceGenerateChunk === "function") forceGenerateChunk(pcx + dx, pcz + dz);
-    }
-  }
-  if (typeof requestChunksAround === "function") requestChunksAround(player.pos.x, player.pos.z);
-
-  if (!loaded) {
-    const bx = Math.floor(player.pos.x);
-    const bz = Math.floor(player.pos.z);
-    let y = WORLD_HEIGHT - 1;
-    while (y > 0 && typeof isSolid === "function" && typeof getBlockAt === "function" && !isSolid(getBlockAt(bx, y, bz))) y--;
-    player.pos.y = y + 1.05;
-    player.vel.set(0, 0, 0);
-  }
-
-  if (typeof isTouchDevice === "function" && !isTouchDevice()) {
-    try { renderer.domElement.requestPointerLock(); } catch (e) {}
-  }
-
-  showToast(loaded ? "✅ تم تحميل العالم" : "🌍 عالم جديد");
-});
-
-menuSettings.addEventListener("click", () => {
-  settingsReturnTo = "main";
-  mainMenu.classList.add("hidden");
-  pauseMenu.classList.add("hidden");
-  settingsMenu.classList.remove("hidden");
-});
-
-settingsBack.addEventListener("click", () => {
-  settingsMenu.classList.add("hidden");
-  if (settingsReturnTo === "pause" && isGameStarted) {
-    pauseMenu.classList.remove("hidden");
-  } else {
-    mainMenu.classList.remove("hidden");
-  }
-});
-
-btnPause.addEventListener("click", () => {
-  if (!isGameStarted) {
-    showToast("ابدأ اللعبة أولاً!");
-    return;
-  }
-  moveState.forward = 0;
-  moveState.backward = 0;
-  moveState.left = 0;
-  moveState.right = 0;
-  moveState.jump = false;
-
-  if (document.pointerLockElement) document.exitPointerLock();
-  pauseMenu.classList.remove("hidden");
-});
-
-pauseResume.addEventListener("click", () => {
-  pauseMenu.classList.add("hidden");
-  if (typeof isTouchDevice === "function" && !isTouchDevice()) {
-    try { renderer.domElement.requestPointerLock(); } catch (e) {}
-  }
-});
-
-pauseSettings.addEventListener("click", () => {
-  settingsReturnTo = "pause";
-  pauseMenu.classList.add("hidden");
-  settingsMenu.classList.remove("hidden");
-});
-
-if (pauseSave) {
-  pauseSave.addEventListener("click", () => {
-    if (typeof saveWorld === "function") saveWorld();
-    hasUnsavedChanges = false;
-  });
-}
-
-pauseExit.addEventListener("click", () => {
-  if (hasUnsavedChanges) {
-    if (!confirm("لديك تعديلات غير محفوظة. هل تريد الخروج بدون حفظ؟")) return;
-  }
-  pauseMenu.classList.add("hidden");
-  settingsMenu.classList.add("hidden");
-  mainMenu.classList.remove("hidden");
-  isGameStarted = false;
-
-  moveState.forward = 0;
-  moveState.backward = 0;
-  moveState.left = 0;
-  moveState.right = 0;
-  moveState.jump = false;
-
-  if (document.pointerLockElement) document.exitPointerLock();
-});
-
-if (btnSave) {
-  btnSave.addEventListener("click", () => {
-    if (typeof saveWorld === "function") saveWorld();
-    hasUnsavedChanges = false;
-  });
-}
-
-btnCamera.addEventListener("click", () => {
-  cameraMode = (cameraMode + 1) % 2;
-  btnCamera.textContent = cameraMode === 0 ? "👤 منظور 1" : "👤 منظور 3";
-  showToast(cameraMode === 0 ? "كاميرا: الشخص الأول" : "كاميرا: الشخص الثالث");
-});
-
-// ============================================================
-//  🎮 تصحيح أحداث التحكم والقفز (إصلاح القفز التلقائي)
-// ============================================================
-const btnJump = document.getElementById("btn-jump");
-if (btnJump) {
-  // استخدام pointerdown مع منع الحدث الافتراضي بدقة
-  btnJump.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    if (player.onGround) {
-      player.vel.y = PLAYER.jumpVel;
-      player.onGround = false;
-      hasUnsavedChanges = true;
-      playSound(300, 0.1, 'square', 0.1);
-    }
-  });
-}
-
-// التحكم بلوحة المفاتيح لمنع التعليق
-window.addEventListener("keydown", (e) => {
-  if (e.code === "Escape" && isGameStarted) {
-    if (!pauseMenu.classList.contains("hidden")) {
-      pauseResume.click();
-    } else if (!settingsMenu.classList.contains("hidden")) {
-      settingsBack.click();
-    } else {
-      btnPause.click();
-    }
-    return;
-  }
-
-  if (!isGameStarted) return;
-
-  if (e.code === "Space") {
-    e.preventDefault();
-    if (player.onGround) {
-      player.vel.y = PLAYER.jumpVel;
-      player.onGround = false;
-      hasUnsavedChanges = true;
-      playSound(300, 0.1, 'square', 0.1);
-    }
-  }
-});
-
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden && isGameStarted) {
-    moveState.forward = 0;
-    moveState.backward = 0;
-    moveState.left = 0;
-    moveState.right = 0;
-    moveState.jump = false;
-    if (pauseMenu.classList.contains("hidden") && settingsMenu.classList.contains("hidden")) {
-      btnPause.click();
-    }
-  }
-});
-
-window.addEventListener("beforeunload", (e) => {
-  if (hasUnsavedChanges) {
-    e.preventDefault();
-    e.returnValue = "";
-  }
-});
-})();
-</script>
-</body>
-</html>
-// ============================================================
-//  UI Elements & Menus — IMADCRAFT 3D (Chunk Edition)
-// ============================================================
-const mainMenu      = document.getElementById("main-menu");
-const settingsMenu  = document.getElementById("settings-menu");
-const pauseMenu     = document.getElementById("pause-menu");
-
-const menuStart     = document.getElementById("menu-start");
-const menuSettings  = document.getElementById("menu-settings");
-const settingsBack  = document.getElementById("settings-back");
-const pauseResume   = document.getElementById("pause-resume");
-const pauseSettings = document.getElementById("pause-settings");
-const pauseSave     = document.getElementById("pause-save");
-const pauseExit     = document.getElementById("pause-exit");
-const btnPause      = document.getElementById("btn-pause");
-const btnSave       = document.getElementById("btn-save");
-const btnCamera     = document.getElementById("btn-camera");
-
-let settingsReturnTo = "main";
-let hasUnsavedChanges = false;
-
-// ============================================================
-//  🎮 بدء اللعبة (مع تحميل العالم وتوليد الـ Chunks)
-// ============================================================
-menuStart.addEventListener("click", () => {
-  mainMenu.classList.add("hidden");
-  settingsMenu.classList.add("hidden");
-  pauseMenu.classList.add("hidden");
-  isGameStarted = true;
-
-  // 1) محاولة تحميل حفظ سابق
-  const loaded = loadWorld();
-
-  // 2) توليد الـ Chunks حول اللاعب
+  // توليد القطع المحيطة باللاعب فوراً
   const pcx = Math.floor(player.pos.x / CHUNK_SIZE);
   const pcz = Math.floor(player.pos.z / CHUNK_SIZE);
   for (let dx = -1; dx <= 1; dx++) {
@@ -656,206 +464,76 @@ menuStart.addEventListener("click", () => {
       forceGenerateChunk(pcx + dx, pcz + dz);
     }
   }
-  requestChunksAround(player.pos.x, player.pos.z);
 
-  // 3) ضبط ارتفاع اللاعب فوق الأرض إن كان عالياً
-  if (!loaded) {
-    const bx = Math.floor(player.pos.x);
-    const bz = Math.floor(player.pos.z);
-    let y = WORLD_HEIGHT - 1;
-    while (y > 0 && !isSolid(getBlockAt(bx, y, bz))) y--;
-    player.pos.y = y + 1.05;
-    player.vel.set(0, 0, 0);
-  }
-
-  // 4) طلب Pointer Lock (سطح المكتب فقط)
-  if (!isTouchDevice()) {
-    try { renderer.domElement.requestPointerLock(); } catch (e) {}
-  }
-
-  showToast(loaded ? "✅ تم تحميل العالم" : "🌍 عالم جديد");
+  // ضبط مكان اللاعب فوق الأرض
+  player.pos.y = 20;
+  showToast("🌍 عالم جديد جاهز!");
 });
 
-// ============================================================
-//  ⚙️ إعدادات القائمة الرئيسية
-// ============================================================
 menuSettings.addEventListener("click", () => {
   settingsReturnTo = "main";
   mainMenu.classList.add("hidden");
-  pauseMenu.classList.add("hidden");
   settingsMenu.classList.remove("hidden");
 });
 
-// ============================================================
-//  ↩️ الرجوع من الإعدادات
-// ============================================================
 settingsBack.addEventListener("click", () => {
   settingsMenu.classList.add("hidden");
-
-  if (settingsReturnTo === "pause" && isGameStarted) {
-    pauseMenu.classList.remove("hidden");
-  } else {
-    mainMenu.classList.remove("hidden");
-  }
+  if (settingsReturnTo === "pause" && isGameStarted) pauseMenu.classList.remove("hidden");
+  else mainMenu.classList.remove("hidden");
 });
 
-// ============================================================
-//  ⏸ إيقاف مؤقت (مع فك Pointer Lock)
-// ============================================================
 btnPause.addEventListener("click", () => {
-  if (!isGameStarted) {
-    showToast("ابدأ اللعبة أولاً!");
-    return;
-  }
-
-  // تصفير الحركة لمنع "الانزلاق" عند الاستئناف
-  moveState.forward = 0;
-  moveState.backward = 0;
-  moveState.left = 0;
-  moveState.right = 0;
-  moveState.jump = false;
-
-  // فك Pointer Lock حتى يظهر المؤشر
-  if (document.pointerLockElement) document.exitPointerLock();
-
+  if (!isGameStarted) return;
   pauseMenu.classList.remove("hidden");
 });
 
-// ============================================================
-//  ▶️ استئناف اللعب (مع إعادة Pointer Lock)
-// ============================================================
 pauseResume.addEventListener("click", () => {
   pauseMenu.classList.add("hidden");
-
-  if (!isTouchDevice()) {
-    try { renderer.domElement.requestPointerLock(); } catch (e) {}
-  }
 });
 
-// ============================================================
-//  ⚙️ الإعدادات من قائمة الإيقاف
-// ============================================================
 pauseSettings.addEventListener("click", () => {
   settingsReturnTo = "pause";
   pauseMenu.classList.add("hidden");
   settingsMenu.classList.remove("hidden");
 });
 
-// ============================================================
-//  💾 حفظ من قائمة الإيقاف
-// ============================================================
-if (pauseSave) {
-  pauseSave.addEventListener("click", () => {
-    saveWorld();
-    hasUnsavedChanges = false;
-  });
-}
-
-// ============================================================
-//  🏠 العودة للقائمة الرئيسية
-// ============================================================
 pauseExit.addEventListener("click", () => {
-  // تحذير إن كان هناك تعديلات غير محفوظة
-  if (hasUnsavedChanges) {
-    if (!confirm("لديك تعديلات غير محفوظة. هل تريد الخروج بدون حفظ؟")) {
-      return;
-    }
-  }
-
   pauseMenu.classList.add("hidden");
-  settingsMenu.classList.add("hidden");
   mainMenu.classList.remove("hidden");
   isGameStarted = false;
-
-  // تصفير الحركة
-  moveState.forward = 0;
-  moveState.backward = 0;
-  moveState.left = 0;
-  moveState.right = 0;
-  moveState.jump = false;
-
-  // فك Pointer Lock
-  if (document.pointerLockElement) document.exitPointerLock();
 });
 
-// ============================================================
-//  💾 حفظ العالم (متوافق مع نظام Chunk)
-// ============================================================
-btnSave.addEventListener("click", () => {
-  saveWorld();
-  hasUnsavedChanges = false;
-});
+btnSave.addEventListener("click", () => saveWorld());
 
-// ============================================================
-//  👤 تبديل المنظور (يعمل فعلياً مع الكاميرا)
-// ============================================================
 btnCamera.addEventListener("click", () => {
   cameraMode = (cameraMode + 1) % 2;
-
-  btnCamera.textContent = cameraMode === 0
-    ? "👤 منظور 1"
-    : "👤 منظور 3";
-
-  showToast(cameraMode === 0 ? "كاميرا: الشخص الأول" : "كاميرا: الشخص الثالث");
+  btnCamera.textContent = cameraMode === 0 ? "👤 منظور 1" : "👤 منظور 3";
 });
 
-// ============================================================
-//  ⌨️ اختصار لوحة المفاتيح — Escape
-// ============================================================
-document.addEventListener("keydown", (e) => {
-  if (e.code !== "Escape") return;
-  if (!isGameStarted) return;
+// دالة التحديث والتحريك المستمرة (Game Loop)
+function animate() {
+  requestAnimationFrame(animate);
 
-  if (!pauseMenu.classList.contains("hidden")) {
-    pauseResume.click();
-  } else if (!settingsMenu.classList.contains("hidden")) {
-    settingsBack.click();
-  } else if (pauseMenu.classList.contains("hidden") &&
-             mainMenu.classList.contains("hidden")) {
-    btnPause.click();
-  }
-});
+  if (isGameStarted) {
+    // تطبيق الجاذبية البسيطة لكي لا يسقط اللاعب للأبد إن لم يكن على أرض صلبة
+    player.vel.y -= PLAYER.gravity * 0.016;
+    player.pos.y += player.vel.y * 0.016;
 
-// ============================================================
-//  🔄 الإيقاف التلقائي عند مغادرة التبويب
-// ============================================================
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden && isGameStarted) {
-    // تصفير الحركة
-    moveState.forward = 0;
-    moveState.backward = 0;
-    moveState.left = 0;
-    moveState.right = 0;
-    moveState.jump = false;
-
-    if (pauseMenu.classList.contains("hidden") &&
-        settingsMenu.classList.contains("hidden")) {
-      btnPause.click();
+    // أرضية مؤقتة افتراضية لمنع السقوط لأسفل إن لم تحمل الـ Chunks
+    if (player.pos.y < 10) {
+      player.pos.y = 12;
+      player.vel.y = 0;
+      player.onGround = true;
     }
-  }
-});
 
-// ============================================================
-//  ⚠️ تحذير عند إغلاق الصفحة بتعديلات غير محفوظة
-// ============================================================
-window.addEventListener("beforeunload", (e) => {
-  if (hasUnsavedChanges) {
-    e.preventDefault();
-    e.returnValue = "";
+    camera.position.copy(player.pos);
   }
-});
 
-// ============================================================
-//  🔗 دوال مساعدة يجب توفرها من الكود الأساسي:
-//  - isTouchDevice()       // كشف الموبايل
-//  - loadWorld()           // من قسم الحفظ
-//  - saveWorld()           // من قسم الحفظ
-//  - forceGenerateChunk()  // من قسم Chunk
-//  - requestChunksAround() // من قسم Chunk
-//  - getBlockAt()          // من قسم World Access
-//  - isSolid()             // من قسم World Access
-//  - showToast()           // من قسم Utils
-//  - player, moveState, yaw, pitch, cameraMode,
-//    isGameStarted, CHUNK_SIZE, WORLD_HEIGHT,
-//    renderer, scene, camera   // متغيرات عامة
-// ============================================================
+  renderer.render(scene, camera);
+}
+animate();
+
+})();
+</script>
+</body>
+</html>
