@@ -312,16 +312,15 @@ const BLOCK = {
   LEAVES: 4, SAND: 5, DIAMOND: 6, GLASS: 7
 };
 
-// ألوان ماينكرافت الأصلية (Minecraft Classic / Alpha Palette)
 const blockColors = {
-  [BLOCK.GRASS]:   0x7fba5d, // أخضر عشبي هادئ
-  [BLOCK.DIRT]:    0x866043, // بني ترابي كلاسيكي
-  [BLOCK.STONE]:   0x757575, // رمادي حجري
-  [BLOCK.WOOD]:    0x6e5130, // خشب جذوع شجر
-  [BLOCK.LEAVES]:  0x3c7a36, // أوراق أشجار غامقة
-  [BLOCK.SAND]:    0xdbd3a0, // رمل الصحراء
-  [BLOCK.DIAMOND]: 0x51eddb, // ألماس مشرق
-  [BLOCK.GLASS]:   0xaee3f0, // زجاج شفاف خفيف
+  [BLOCK.GRASS]:   0x7fba5d,
+  [BLOCK.DIRT]:    0x866043,
+  [BLOCK.STONE]:   0x757575,
+  [BLOCK.WOOD]:    0x6e5130,
+  [BLOCK.LEAVES]:  0x3c7a36,
+  [BLOCK.SAND]:    0xdbd3a0,
+  [BLOCK.DIAMOND]: 0x51eddb,
+  [BLOCK.GLASS]:   0xaee3f0,
 };
 
 const PLAYER = {
@@ -411,14 +410,208 @@ function playSound(freq, duration, type = 'sine', volume = 0.15) {
 }
 
 // ============================================================
-//  CHUNK
+//  UI Elements & Menus — IMADCRAFT 3D (Chunk Edition)
 // ============================================================
-class Chunk {
-  constructor(cx, cz) {
-    this.cx = cx; this.cz = cz;
-    this.blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE).fill(AIR);
-    this.meshes = [];
+const mainMenu      = document.getElementById("main-menu");
+const settingsMenu  = document.getElementById("settings-menu");
+const pauseMenu     = document.getElementById("pause-menu");
+
+const menuStart     = document.getElementById("menu-start");
+const menuSettings  = document.getElementById("menu-settings");
+const settingsBack  = document.getElementById("settings-back");
+const pauseResume   = document.getElementById("pause-resume");
+const pauseSettings = document.getElementById("pause-settings");
+const pauseSave     = document.getElementById("pause-save");
+const pauseExit     = document.getElementById("pause-exit");
+const btnPause      = document.getElementById("btn-pause");
+const btnSave       = document.getElementById("btn-save");
+const btnCamera     = document.getElementById("btn-camera");
+
+let settingsReturnTo = "main";
+let hasUnsavedChanges = false;
+
+// ============================================================
+//  🎮 بدء اللعبة
+// ============================================================
+menuStart.addEventListener("click", () => {
+  mainMenu.classList.add("hidden");
+  settingsMenu.classList.add("hidden");
+  pauseMenu.classList.add("hidden");
+  isGameStarted = true;
+
+  // توفير دالة وهمية أو استدعاء الحفظ والتوليد إذا لم تكن معرفة لاحقاً لتفادي الأخطاء
+  const loaded = typeof loadWorld === "function" ? loadWorld() : false;
+
+  const pcx = Math.floor(player.pos.x / CHUNK_SIZE);
+  const pcz = Math.floor(player.pos.z / CHUNK_SIZE);
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      if (typeof forceGenerateChunk === "function") forceGenerateChunk(pcx + dx, pcz + dz);
+    }
   }
-  idx(lx, ly, lz) { return lx + lz * CHUNK_SIZE + ly * CHUNK_SIZE * CHUNK_SIZE; }
-  get(lx, ly, lz) {
-    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE || ly < 0 ||
+  if (typeof requestChunksAround === "function") requestChunksAround(player.pos.x, player.pos.z);
+
+  if (!loaded) {
+    const bx = Math.floor(player.pos.x);
+    const bz = Math.floor(player.pos.z);
+    let y = WORLD_HEIGHT - 1;
+    while (y > 0 && typeof isSolid === "function" && typeof getBlockAt === "function" && !isSolid(getBlockAt(bx, y, bz))) y--;
+    player.pos.y = y + 1.05;
+    player.vel.set(0, 0, 0);
+  }
+
+  if (typeof isTouchDevice === "function" && !isTouchDevice()) {
+    try { renderer.domElement.requestPointerLock(); } catch (e) {}
+  }
+
+  showToast(loaded ? "✅ تم تحميل العالم" : "🌍 عالم جديد");
+});
+
+menuSettings.addEventListener("click", () => {
+  settingsReturnTo = "main";
+  mainMenu.classList.add("hidden");
+  pauseMenu.classList.add("hidden");
+  settingsMenu.classList.remove("hidden");
+});
+
+settingsBack.addEventListener("click", () => {
+  settingsMenu.classList.add("hidden");
+  if (settingsReturnTo === "pause" && isGameStarted) {
+    pauseMenu.classList.remove("hidden");
+  } else {
+    mainMenu.classList.remove("hidden");
+  }
+});
+
+btnPause.addEventListener("click", () => {
+  if (!isGameStarted) {
+    showToast("ابدأ اللعبة أولاً!");
+    return;
+  }
+  moveState.forward = 0;
+  moveState.backward = 0;
+  moveState.left = 0;
+  moveState.right = 0;
+  moveState.jump = false;
+
+  if (document.pointerLockElement) document.exitPointerLock();
+  pauseMenu.classList.remove("hidden");
+});
+
+pauseResume.addEventListener("click", () => {
+  pauseMenu.classList.add("hidden");
+  if (typeof isTouchDevice === "function" && !isTouchDevice()) {
+    try { renderer.domElement.requestPointerLock(); } catch (e) {}
+  }
+});
+
+pauseSettings.addEventListener("click", () => {
+  settingsReturnTo = "pause";
+  pauseMenu.classList.add("hidden");
+  settingsMenu.classList.remove("hidden");
+});
+
+if (pauseSave) {
+  pauseSave.addEventListener("click", () => {
+    if (typeof saveWorld === "function") saveWorld();
+    hasUnsavedChanges = false;
+  });
+}
+
+pauseExit.addEventListener("click", () => {
+  if (hasUnsavedChanges) {
+    if (!confirm("لديك تعديلات غير محفوظة. هل تريد الخروج بدون حفظ؟")) return;
+  }
+  pauseMenu.classList.add("hidden");
+  settingsMenu.classList.add("hidden");
+  mainMenu.classList.remove("hidden");
+  isGameStarted = false;
+
+  moveState.forward = 0;
+  moveState.backward = 0;
+  moveState.left = 0;
+  moveState.right = 0;
+  moveState.jump = false;
+
+  if (document.pointerLockElement) document.exitPointerLock();
+});
+
+if (btnSave) {
+  btnSave.addEventListener("click", () => {
+    if (typeof saveWorld === "function") saveWorld();
+    hasUnsavedChanges = false;
+  });
+}
+
+btnCamera.addEventListener("click", () => {
+  cameraMode = (cameraMode + 1) % 2;
+  btnCamera.textContent = cameraMode === 0 ? "👤 منظور 1" : "👤 منظور 3";
+  showToast(cameraMode === 0 ? "كاميرا: الشخص الأول" : "كاميرا: الشخص الثالث");
+});
+
+// ============================================================
+//  🎮 تصحيح أحداث التحكم والقفز (إصلاح القفز التلقائي)
+// ============================================================
+const btnJump = document.getElementById("btn-jump");
+if (btnJump) {
+  // استخدام pointerdown مع منع الحدث الافتراضي بدقة
+  btnJump.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    if (player.onGround) {
+      player.vel.y = PLAYER.jumpVel;
+      player.onGround = false;
+      hasUnsavedChanges = true;
+      playSound(300, 0.1, 'square', 0.1);
+    }
+  });
+}
+
+// التحكم بلوحة المفاتيح لمنع التعليق
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Escape" && isGameStarted) {
+    if (!pauseMenu.classList.contains("hidden")) {
+      pauseResume.click();
+    } else if (!settingsMenu.classList.contains("hidden")) {
+      settingsBack.click();
+    } else {
+      btnPause.click();
+    }
+    return;
+  }
+
+  if (!isGameStarted) return;
+
+  if (e.code === "Space") {
+    e.preventDefault();
+    if (player.onGround) {
+      player.vel.y = PLAYER.jumpVel;
+      player.onGround = false;
+      hasUnsavedChanges = true;
+      playSound(300, 0.1, 'square', 0.1);
+    }
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && isGameStarted) {
+    moveState.forward = 0;
+    moveState.backward = 0;
+    moveState.left = 0;
+    moveState.right = 0;
+    moveState.jump = false;
+    if (pauseMenu.classList.contains("hidden") && settingsMenu.classList.contains("hidden")) {
+      btnPause.click();
+    }
+  }
+});
+
+window.addEventListener("beforeunload", (e) => {
+  if (hasUnsavedChanges) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+})();
+</script>
+</body>
+</html>
