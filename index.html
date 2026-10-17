@@ -1,42 +1,361 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>IMADCRAFT 3D — Chunk Edition Pro</title>
+<style>
+  *, *::before, *::after {
+    box-sizing: border-box;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    touch-action: none;
+  }
+  canvas { display: block; width: 100vw; height: 100vh; }
+
+  .game-overlay {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: linear-gradient(135deg, rgba(15,23,42,0.94), rgba(30,41,59,0.96));
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    z-index: 100; transition: opacity 0.3s ease;
+  }
+  .game-overlay.hidden { opacity: 0; pointer-events: none; }
+  .menu-title {
+    font-size: 2.8rem; font-weight: 900; color: #fff; margin-bottom: 24px;
+    text-shadow: 0 4px 20px rgba(59,130,246,0.7); letter-spacing: 2px;
+  }
+  .menu-btn {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    border: 1px solid rgba(255,255,255,0.3); color: #fff;
+    font-size: 1.1rem; font-weight: bold; padding: 13px 36px;
+    margin: 8px 0; border-radius: 16px; cursor: pointer;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    transition: transform 0.15s, background 0.15s;
+    width: 260px; text-align: center;
+  }
+  .menu-btn:active { transform: scale(0.95); }
+  .menu-btn.secondary {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.25);
+  }
+
+  .settings-box {
+    background: rgba(15,23,42,0.85);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 20px; padding: 26px; width: 90%; max-width: 460px;
+    max-height: 80vh; overflow-y: auto;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  .settings-section-title {
+    color: #93c5fd; font-size: 0.9rem; font-weight: bold;
+    margin: 16px 0 8px 0; padding-bottom: 4px;
+    border-bottom: 1px solid rgba(147,197,253,0.3);
+  }
+  .setting-item {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 14px; color: #fff; font-size: 0.95rem; font-weight: bold;
+  }
+  .setting-item input[type="range"] { width: 48%; cursor: pointer; }
+  .setting-item input[type="checkbox"] { width: 22px; height: 22px; cursor: pointer; }
+  .setting-value { color: #fbbf24; min-width: 36px; text-align: left; }
+
+  #hud-top {
+    position: fixed; top: 12px; left: 12px; right: 12px;
+    display: flex; justify-content: space-between; align-items: center;
+    pointer-events: none; z-index: 20; gap: 8px; flex-wrap: wrap;
+  }
+  .hud-badge {
+    background: rgba(15,23,42,0.8); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.2); color: #fff;
+    padding: 6px 12px; border-radius: 16px; font-size: 12px; font-weight: 700;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4); white-space: nowrap;
+  }
+  #top-actions { display: flex; gap: 6px; pointer-events: auto; flex-wrap: wrap; }
+  .hud-btn {
+    background: rgba(15,23,42,0.9);
+    border: 1px solid rgba(255,255,255,0.25); color: #fff;
+    padding: 6px 10px; border-radius: 14px; font-size: 11px; font-weight: bold;
+    cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    transition: background 0.15s, transform 0.1s;
+  }
+  .hud-btn:active { background: rgba(59,130,246,0.9); transform: scale(0.95); }
+
+  #crosshair {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 18px; height: 18px; pointer-events: none; z-index: 10;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute;
+    background: rgba(255,255,255,0.9);
+    box-shadow: 0 0 3px rgba(0,0,0,0.9);
+  }
+  #crosshair::before { top: 8px; left: 0; width: 18px; height: 2px; }
+  #crosshair::after { top: 0; left: 8px; width: 2px; height: 18px; }
+
+  #toast {
+    position: fixed; top: 65px; left: 50%;
+    transform: translateX(-50%) translateY(-20px);
+    background: rgba(16,185,129,0.95); color: #fff;
+    padding: 6px 18px; border-radius: 20px; font-size: 12px; font-weight: bold;
+    pointer-events: none; opacity: 0;
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+    z-index: 30; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  #hotbar-container {
+    position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 5px; background: rgba(15,23,42,0.85);
+    padding: 5px; border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.2);
+    backdrop-filter: blur(12px); z-index: 20;
+    max-width: 95vw; overflow-x: auto;
+  }
+  .hotbar-slot {
+    width: 42px; height: 42px; border-radius: 10px;
+    border: 2px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.05);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; cursor: pointer; flex-shrink: 0;
+    transition: all 0.15s ease; position: relative;
+  }
+  .hotbar-slot .slot-num {
+    position: absolute; top: 1px; right: 3px;
+    font-size: 8px; color: rgba(255,255,255,0.5); font-weight: bold;
+  }
+  .hotbar-slot.active {
+    border-color: #f59e0b; background: rgba(245,158,11,0.3);
+    transform: scale(1.06);
+    box-shadow: 0 0 10px rgba(245,158,11,0.5);
+  }
+
+  #controls-layer {
+    position: fixed; bottom: 12px; left: 0; right: 0;
+    padding: 0 14px; display: flex;
+    justify-content: space-between; align-items: flex-end;
+    pointer-events: none; z-index: 20;
+  }
+  .interactive-ctrl { pointer-events: auto; }
+  .dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 46px);
+    grid-template-rows: repeat(3, 46px);
+    gap: 4px;
+  }
+  .dpad-btn {
+    background: rgba(30,41,59,0.85);
+    border: 1.5px solid rgba(255,255,255,0.3); color: #fff;
+    border-radius: 12px; font-size: 16px; font-weight: bold;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.4); cursor: pointer;
+  }
+  .dpad-btn:active, .dpad-btn.pressed {
+    background: rgba(16,185,129,0.9); transform: scale(0.94);
+  }
+  #btn-up { grid-column: 2; grid-row: 1; }
+  #btn-left { grid-column: 1; grid-row: 2; }
+  #btn-down { grid-column: 2; grid-row: 3; }
+  #btn-right { grid-column: 3; grid-row: 2; }
+
+  .action-buttons { display: flex; gap: 6px; }
+  .action-btn {
+    width: 54px; height: 54px; border-radius: 16px;
+    border: 1.5px solid rgba(255,255,255,0.3);
+    background: rgba(30,41,59,0.85); color: #fff;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-size: 10px; font-weight: bold;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.4); cursor: pointer;
+  }
+  .action-btn span { font-size: 16px; margin-bottom: 1px; }
+  .action-btn:active { transform: scale(0.92); }
+  #btn-break { background: rgba(220,38,38,0.85); }
+  #btn-build { background: rgba(16,185,129,0.85); }
+  #btn-jump { background: rgba(59,130,246,0.85); }
+</style>
+</head>
+<body>
+
+<!-- Main Menu -->
+<div id="main-menu" class="game-overlay">
+  <div class="menu-title">IMADCRAFT 3D</div>
+  <button class="menu-btn" id="menu-start">▶ بدء اللعبة</button>
+  <button class="menu-btn secondary" id="menu-settings">⚙ الإعدادات</button>
+</div>
+
+<!-- Settings -->
+<div id="settings-menu" class="game-overlay hidden">
+  <div class="menu-title" style="font-size:1.8rem;margin-bottom:16px;">الإعدادات</div>
+  <div class="settings-box">
+    <div class="settings-section-title">🎮 التحكم</div>
+    <div class="setting-item">
+      <span>حساسية النظر:</span>
+      <input type="range" id="setting-sens" min="1" max="10" value="5">
+      <span class="setting-value" id="val-sens">5</span>
+    </div>
+    <div class="setting-item">
+      <span>سرعة الحركة:</span>
+      <input type="range" id="setting-speed" min="3" max="10" value="5">
+      <span class="setting-value" id="val-speed">5</span>
+    </div>
+
+    <div class="settings-section-title">🖼 الجرافيك</div>
+    <div class="setting-item">
+      <span>مسافة الرسم (Chunks):</span>
+      <input type="range" id="setting-render" min="1" max="5" value="3">
+      <span class="setting-value" id="val-render">3</span>
+    </div>
+    <div class="setting-item">
+      <span>جودة الرسم:</span>
+      <input type="range" id="setting-quality" min="50" max="125" value="100">
+      <span class="setting-value" id="val-quality">100%</span>
+    </div>
+    <div class="setting-item">
+      <span>الضباب (Fog):</span>
+      <input type="checkbox" id="setting-fog" checked>
+    </div>
+    <div class="setting-item">
+      <span>عرض FPS:</span>
+      <input type="checkbox" id="setting-fps" checked>
+    </div>
+    <div class="setting-item">
+      <span>شاشة كاملة:</span>
+      <input type="checkbox" id="setting-fullscreen">
+    </div>
+
+    <div class="settings-section-title">🔊 الصوت</div>
+    <div class="setting-item">
+      <span>مستوى الصوت:</span>
+      <input type="range" id="setting-volume" min="0" max="100" value="80">
+      <span class="setting-value" id="val-volume">80</span>
+    </div>
+
+    <button class="menu-btn" id="settings-back" style="width:100%;margin-top:14px;">رجوع</button>
+  </div>
+</div>
+
+<!-- Pause -->
+<div id="pause-menu" class="game-overlay hidden">
+  <div class="menu-title" style="font-size:2rem;">⏸ اللعبة متوقفة</div>
+  <button class="menu-btn" id="pause-resume">▶ استئناف</button>
+  <button class="menu-btn secondary" id="pause-settings">⚙ الإعدادات</button>
+  <button class="menu-btn secondary" id="pause-save">💾 حفظ العالم</button>
+  <button class="menu-btn secondary" id="pause-exit">🏠 القائمة الرئيسية</button>
+</div>
+
+<div id="hud-top">
+  <div style="display:flex;gap:6px;flex-wrap:wrap;">
+    <div class="hud-badge" id="hud-fps">FPS: --</div>
+    <div class="hud-badge" id="hud-coords">XYZ: 0 0 0</div>
+    <div class="hud-badge" id="hud-chunks">Chunks: 0</div>
+  </div>
+  <div id="top-actions">
+    <button class="hud-btn" id="btn-camera">👤 منظور 1</button>
+    <button class="hud-btn" id="btn-pause">⏸</button>
+    <button class="hud-btn" id="btn-save">💾</button>
+  </div>
+</div>
+
+<div id="crosshair"></div>
+<div id="toast">جاهز!</div>
+
+<div id="hotbar-container" class="interactive-ctrl">
+  <div class="hotbar-slot active" data-type="0" title="عشب"><span class="slot-num">1</span>🟩</div>
+  <div class="hotbar-slot" data-type="1" title="تراب"><span class="slot-num">2</span>🟫</div>
+  <div class="hotbar-slot" data-type="2" title="حجر"><span class="slot-num">3</span>⬜</div>
+  <div class="hotbar-slot" data-type="3" title="خشب"><span class="slot-num">4</span>🪵</div>
+  <div class="hotbar-slot" data-type="4" title="أوراق"><span class="slot-num">5</span>🍃</div>
+  <div class="hotbar-slot" data-type="5" title="رمل"><span class="slot-num">6</span>🟨</div>
+  <div class="hotbar-slot" data-type="6" title="ألماس"><span class="slot-num">7</span>💎</div>
+  <div class="hotbar-slot" data-type="7" title="زجاج"><span class="slot-num">8</span>🟦</div>
+</div>
+
+<div id="controls-layer">
+  <div class="dpad interactive-ctrl">
+    <div class="dpad-btn" id="btn-up">▲</div>
+    <div class="dpad-btn" id="btn-left">◀</div>
+    <div class="dpad-btn" id="btn-down">▼</div>
+    <div class="dpad-btn" id="btn-right">▶</div>
+  </div>
+  <div class="action-buttons interactive-ctrl">
+    <div class="action-btn" id="btn-jump"><span>⬆</span>قفز</div>
+    <div class="action-btn" id="btn-break"><span>⛏</span>كسر</div>
+    <div class="action-btn" id="btn-build"><span>🧱</span>بناء</div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (() => {
 "use strict";
 
-/* ==================== CONFIG ==================== */
+// ============================================================
+//  CONFIG
+// ============================================================
 const CHUNK_SIZE = 16;
 const WORLD_HEIGHT = 40;
 const AIR = 255;
+const TREE_TILE = 8;
+const SAVE_KEY_WORLD = "IMADCRAFT_SAVE_V3";
+const SAVE_KEY_SETTINGS = "IMADCRAFT_SETTINGS_V1";
 
-const BLOCK = { GRASS: 0, DIRT: 1, STONE: 2, WOOD: 3, LEAVES: 4, SAND: 5, DIAMOND: 6, GLASS: 7, BEDROCK: 8 };
-// ✅ إصلاح #7: بلوك bedrock حقيقي
-
-const blockColors = {
-  [BLOCK.GRASS]: 0x52b748, [BLOCK.DIRT]: 0x8c5830, [BLOCK.STONE]: 0x858585,
-  [BLOCK.WOOD]: 0x966133, [BLOCK.LEAVES]: 0x2e8b34, [BLOCK.SAND]: 0xebd686,
-  [BLOCK.DIAMOND]: 0x33e1d6, [BLOCK.GLASS]: 0xa8e1f5, [BLOCK.BEDROCK]: 0x1a1a1a,
+const BLOCK = {
+  GRASS: 0, DIRT: 1, STONE: 2, WOOD: 3,
+  LEAVES: 4, SAND: 5, DIAMOND: 6, GLASS: 7
 };
 
-const PLAYER = { width: 0.6, height: 1.8, eye: 1.62, gravity: 26, jumpVel: 8.2, baseSpeed: 5.0 };
+const blockColors = {
+  [BLOCK.GRASS]:   0x52b748,
+  [BLOCK.DIRT]:    0x8c5830,
+  [BLOCK.STONE]:   0x858585,
+  [BLOCK.WOOD]:    0x966133,
+  [BLOCK.LEAVES]:  0x2e8b34,
+  [BLOCK.SAND]:    0xebd686,
+  [BLOCK.DIAMOND]: 0x33e1d6,
+  [BLOCK.GLASS]:   0xa8e1f5,
+};
 
-const gameSettings = { sensitivity: 5, moveSpeed: 5, renderDistance: 3, quality: 100, fog: true, showFps: true, volume: 80 };
+const PLAYER = {
+  width: 0.6, height: 1.8, eye: 1.62,
+  gravity: 26, jumpVel: 8.2, baseSpeed: 5.0,
+};
 
-/* ==================== STATE ==================== */
+const gameSettings = {
+  sensitivity: 5, moveSpeed: 5, renderDistance: 3,
+  quality: 100, fog: true, showFps: true, volume: 80,
+};
+
+// ============================================================
+//  STATE
+// ============================================================
 let selectedBlockType = BLOCK.GRASS;
 let cameraMode = 0;
 let isGameStarted = false;
-let hasUnsavedChanges = false;
-let settingsReturnTo = "main";
+let ignorePointerlockChange = false;
 let yaw = 0, pitch = 0;
 
-const player = { pos: new THREE.Vector3(8, 25, 8), vel: new THREE.Vector3(), onGround: false };
+const player = {
+  pos: new THREE.Vector3(8, 25, 8),
+  vel: new THREE.Vector3(),
+  onGround: false
+};
 const moveState = { forward: 0, backward: 0, left: 0, right: 0, jump: false };
 
 const chunks = new Map();
 const genQueue = [];
 const chunkMods = new Map();
 
-/* ==================== UTILS ==================== */
+// ============================================================
+//  UTILS
+// ============================================================
 function showToast(text) {
   const t = document.getElementById("toast");
   t.textContent = text;
@@ -45,47 +364,84 @@ function showToast(text) {
   showToast._t = setTimeout(() => t.classList.remove("show"), 1800);
 }
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-function hash(x, z) { const h = Math.sin(x * 127.1 + z * 311.7 + 0.5) * 43758.5453; return h - Math.floor(h); }
+
+function hash(x, z) {
+  const h = Math.sin(x * 127.1 + z * 311.7 + 0.5) * 43758.5453;
+  return h - Math.floor(h);
+}
 function noise2D(x, z) {
-  const xi = Math.floor(x), zi = Math.floor(z), xf = x - xi, zf = z - zi;
-  const a = hash(xi, zi), b = hash(xi+1, zi), c = hash(xi, zi+1), d = hash(xi+1, zi+1);
-  const u = xf*xf*(3-2*xf), v = zf*zf*(3-2*zf);
-  return (a*(1-u)+b*u)*(1-v) + (c*(1-u)+d*u)*v;
+  const xi = Math.floor(x), zi = Math.floor(z);
+  const xf = x - xi, zf = z - zi;
+  const a = hash(xi, zi), b = hash(xi + 1, zi);
+  const c = hash(xi, zi + 1), d = hash(xi + 1, zi + 1);
+  const u = xf * xf * (3 - 2 * xf);
+  const v = zf * zf * (3 - 2 * zf);
+  return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
 }
 function terrainHeight(x, z) {
   let h = 0;
-  h += noise2D(x*0.02, z*0.02) * 10;
-  h += noise2D(x*0.06, z*0.06) * 4;
-  h += noise2D(x*0.15, z*0.15) * 2;
+  h += noise2D(x * 0.02, z * 0.02) * 10;
+  h += noise2D(x * 0.06, z * 0.06) * 4;
+  h += noise2D(x * 0.15, z * 0.15) * 2;
   return Math.floor(h) + 15;
 }
 
-/* ==================== CHUNK ==================== */
+// ============================================================
+//  SOUND
+// ============================================================
+let audioCtx = null;
+function playSound(freq, duration, type = 'sine', volume = 0.15) {
+  if (gameSettings.volume === 0) return;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    const vol = (gameSettings.volume / 100) * volume;
+    gain.gain.setValueAtTime(Math.max(0.0001, vol), audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+  } catch (e) {}
+}
+
+// ============================================================
+//  CHUNK
+// ============================================================
 class Chunk {
   constructor(cx, cz) {
     this.cx = cx; this.cz = cz;
     this.blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE).fill(AIR);
     this.meshes = [];
-    this.instanced = {};
   }
   idx(lx, ly, lz) { return lx + lz * CHUNK_SIZE + ly * CHUNK_SIZE * CHUNK_SIZE; }
   get(lx, ly, lz) {
-    if (lx<0||lx>=CHUNK_SIZE||lz<0||lz>=CHUNK_SIZE||ly<0||ly>=WORLD_HEIGHT) return AIR;
+    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE || ly < 0 || ly >= WORLD_HEIGHT) return AIR;
     return this.blocks[this.idx(lx, ly, lz)];
   }
   set(lx, ly, lz, t) {
-    if (lx<0||lx>=CHUNK_SIZE||lz<0||lz>=CHUNK_SIZE||ly<0||ly>=WORLD_HEIGHT) return;
+    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE || ly < 0 || ly >= WORLD_HEIGHT) return;
     this.blocks[this.idx(lx, ly, lz)] = t;
   }
 }
 
-/* ==================== WORLD ACCESS ==================== */
+// ============================================================
+//  WORLD ACCESS
+// ============================================================
 function worldToChunk(x, z) {
-  return { cx: Math.floor(x/CHUNK_SIZE), cz: Math.floor(z/CHUNK_SIZE),
-           lx: ((x%CHUNK_SIZE)+CHUNK_SIZE)%CHUNK_SIZE, lz: ((z%CHUNK_SIZE)+CHUNK_SIZE)%CHUNK_SIZE };
+  return {
+    cx: Math.floor(x / CHUNK_SIZE),
+    cz: Math.floor(z / CHUNK_SIZE),
+    lx: ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE,
+    lz: ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE
+  };
 }
 function getBlockAt(x, y, z) {
-  if (y<0||y>=WORLD_HEIGHT) return AIR;
+  if (y < 0 || y >= WORLD_HEIGHT) return AIR;
   const c = worldToChunk(x, z);
   const chunk = chunks.get(`${c.cx},${c.cz}`);
   if (!chunk) return AIR;
@@ -93,374 +449,537 @@ function getBlockAt(x, y, z) {
 }
 function isSolid(t) { return t !== AIR; }
 
+function rebuildChunkIfExists(cx, cz) {
+  const ch = chunks.get(`${cx},${cz}`);
+  if (ch) rebuildChunk(ch);
+}
+
 function setBlockAt(x, y, z, type) {
-  if (y<0||y>=WORLD_HEIGHT) return false;
+  if (y <= 0 || y >= WORLD_HEIGHT) return false; // حماية أرضية العالم
   const c = worldToChunk(x, z);
   const key = `${c.cx},${c.cz}`;
   const chunk = chunks.get(key);
   if (!chunk) return false;
+
   const old = chunk.get(c.lx, y, c.lz);
   if (old === type) return false;
   chunk.set(c.lx, y, c.lz, type);
+
   if (!chunkMods.has(key)) chunkMods.set(key, new Map());
   chunkMods.get(key).set(`${c.lx},${y},${c.lz}`, type);
-  hasUnsavedChanges = true;
-  rebuildChunk(chunk);
 
-  // ✅ إصلاح #4: أعد بناء القطع المجاورة عند تعديل بلوك على الحدود
-  if (c.lx === 0) { const nb = chunks.get(`${c.cx-1},${c.cz}`); if (nb) rebuildChunk(nb); }
-  if (c.lx === CHUNK_SIZE-1) { const nb = chunks.get(`${c.cx+1},${c.cz}`); if (nb) rebuildChunk(nb); }
-  if (c.lz === 0) { const nb = chunks.get(`${c.cx},${c.cz-1}`); if (nb) rebuildChunk(nb); }
-  if (c.lz === CHUNK_SIZE-1) { const nb = chunks.get(`${c.cx},${c.cz+1}`); if (nb) rebuildChunk(nb); }
+  rebuildChunk(chunk);
+  // إعادة بناء الجيران عند التعديل على الحدود
+  if (c.lx === 0) rebuildChunkIfExists(c.cx - 1, c.cz);
+  if (c.lx === CHUNK_SIZE - 1) rebuildChunkIfExists(c.cx + 1, c.cz);
+  if (c.lz === 0) rebuildChunkIfExists(c.cx, c.cz - 1);
+  if (c.lz === CHUNK_SIZE - 1) rebuildChunkIfExists(c.cx, c.cz + 1);
   return true;
 }
 
-/* ==================== TERRAIN GEN ==================== */
+// ============================================================
+//  TREE GENERATION (procedural, cross-chunk)
+// ============================================================
+function getTreeInTile(tx, tz) {
+  const h = hash(tx * 12.9898 + 78.233, tz * 78.233 + 43.122);
+  if (h < 0.55) return null;
+  const T = TREE_TILE;
+  const ox = Math.floor(hash(tx + 11, tz + 7) * (T - 2)) + 1;
+  const oz = Math.floor(hash(tx + 3, tz + 13) * (T - 2)) + 1;
+  const wx = tx * T + ox, wz = tz * T + oz;
+  const gy = terrainHeight(wx, wz);
+  if (gy < 14 || gy > WORLD_HEIGHT - 10) return null;
+  return { x: wx, z: wz, groundY: gy };
+}
+
+function placeTreeInChunk(chunk, wx, wz, groundY) {
+  const baseX = chunk.cx * CHUNK_SIZE;
+  const baseZ = chunk.cz * CHUNK_SIZE;
+  const trunkH = 4 + Math.floor(hash(wx, wz) * 3);
+
+  for (let dy = 1; dy <= trunkH; dy++) {
+    const lx = wx - baseX, lz = wz - baseZ;
+    if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
+      const wy = groundY + dy;
+      if (wy < WORLD_HEIGHT) chunk.set(lx, wy, lz, BLOCK.WOOD);
+    }
+  }
+  const leafTop = groundY + trunkH;
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dy = -1; dy <= 2; dy++) {
+        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) continue;
+        if (dx === 0 && dz === 0 && dy <= 0) continue;
+        const lx = wx - baseX + dx, lz = wz - baseZ + dz;
+        const ny = leafTop + dy;
+        if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) continue;
+        if (ny < 0 || ny >= WORLD_HEIGHT) continue;
+        if (chunk.get(lx, ny, lz) === AIR) chunk.set(lx, ny, lz, BLOCK.LEAVES);
+      }
+    }
+  }
+}
+
+function placeTreesInChunk(chunk) {
+  const baseX = chunk.cx * CHUNK_SIZE;
+  const baseZ = chunk.cz * CHUNK_SIZE;
+  const R = 4;
+  const minTx = Math.floor((baseX - R) / TREE_TILE);
+  const maxTx = Math.floor((baseX + CHUNK_SIZE + R) / TREE_TILE);
+  const minTz = Math.floor((baseZ - R) / TREE_TILE);
+  const maxTz = Math.floor((baseZ + CHUNK_SIZE + R) / TREE_TILE);
+  for (let tx = minTx; tx <= maxTx; tx++) {
+    for (let tz = minTz; tz <= maxTz; tz++) {
+      const tree = getTreeInTile(tx, tz);
+      if (tree) placeTreeInChunk(chunk, tree.x, tree.z, tree.groundY);
+    }
+  }
+}
+
+// ============================================================
+//  TERRAIN GENERATION
+// ============================================================
 function generateChunk(chunk) {
   const baseX = chunk.cx * CHUNK_SIZE;
   const baseZ = chunk.cz * CHUNK_SIZE;
+
   for (let lx = 0; lx < CHUNK_SIZE; lx++) {
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
       const wx = baseX + lx, wz = baseZ + lz;
       const h = clamp(terrainHeight(wx, wz), 1, WORLD_HEIGHT - 6);
-      // ✅ إصلاح #7: طبقة bedrock صلبة في y=0
-      chunk.set(lx, 0, lz, BLOCK.BEDROCK);
-      for (let y = 1; y <= h; y++) {
+      for (let y = 0; y <= h; y++) {
         let t;
         if (y === h) t = (h < 13) ? BLOCK.SAND : BLOCK.GRASS;
         else if (y >= h - 2) t = (h < 13) ? BLOCK.SAND : BLOCK.DIRT;
         else t = BLOCK.STONE;
-        if (y < 4 && hash(wx*3 + y, wz*3) > 0.97) t = BLOCK.DIAMOND;
         chunk.set(lx, y, lz, t);
-      }
-      if (h > 13 && h < WORLD_HEIGHT - 8 && lx >= 3 && lx <= 12 && lz >= 3 && lz <= 12) {
-        const seed = hash(wx*12.9898, wz*78.233);
-        if (seed > 0.985) {
-          const th = 4 + Math.floor(hash(wx, wz) * 2);
-          for (let ty = 1; ty <= th; ty++) chunk.set(lx, h+ty, lz, BLOCK.WOOD);
-          const ly = h + th;
-          for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = -1; dy <= 2; dy++) {
-            if (Math.abs(dx)===2 && Math.abs(dz)===2) continue;
-            if (dx===0 && dz===0 && dy<=0) continue;
-            const nx=lx+dx, nz=lz+dz, ny=ly+dy;
-            if (nx<0||nx>=CHUNK_SIZE||nz<0||nz>=CHUNK_SIZE||ny>=WORLD_HEIGHT) continue;
-            if (chunk.get(nx,ny,nz) === AIR) chunk.set(nx,ny,nz, BLOCK.LEAVES);
-          }
-        }
       }
     }
   }
-  // تطبيق التعديلات المحفوظة على هذه القطعة
+  placeTreesInChunk(chunk);
+
+  // تطبيق التعديلات المحفوظة
   const key = `${chunk.cx},${chunk.cz}`;
   const mods = chunkMods.get(key);
-  if (mods) for (const [bkey, t] of mods) {
-    const [lx, ly, lz] = bkey.split(',').map(Number);
-    chunk.set(lx, ly, lz, t);
+  if (mods) {
+    for (const [bkey, t] of mods) {
+      const [lx, ly, lz] = bkey.split(',').map(Number);
+      chunk.set(lx, ly, lz, t);
+    }
   }
 }
 
-/* ==================== MESHING ==================== */
+// ============================================================
+//  MESHING
+// ============================================================
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 const materials = {};
 Object.keys(blockColors).forEach(type => {
   const isGlass = parseInt(type) === BLOCK.GLASS;
   materials[type] = new THREE.MeshLambertMaterial({
-    color: blockColors[type], transparent: isGlass,
-    opacity: isGlass ? 0.55 : 1, depthWrite: !isGlass
+    color: blockColors[type],
+    transparent: isGlass,
+    opacity: isGlass ? 0.55 : 1,
+    depthWrite: !isGlass,
   });
 });
 
-// ✅ إصلاح #3: افحص البلوكات المجاورة عبر حدود القطع (يمنع z-fighting)
-function isExposedInChunk(chunk, lx, ly, lz) {
-  const wx = chunk.cx * CHUNK_SIZE + lx;
-  const wz = chunk.cz * CHUNK_SIZE + lz;
-  return !isSolid(getBlockAt(wx+1, ly, wz)) ||
-         !isSolid(getBlockAt(wx-1, ly, wz)) ||
-         !isSolid(getBlockAt(wx, ly+1, wz)) ||
-         !isSolid(getBlockAt(wx, ly-1, wz)) ||
-         !isSolid(getBlockAt(wx, ly, wz+1)) ||
-         !isSolid(getBlockAt(wx, ly, wz-1));
+const NEIGHBOR_OFFSETS = [
+  [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]
+];
+
+function isExposedAt(chunk, lx, ly, lz) {
+  const t = chunk.get(lx, ly, lz);
+  if (t === AIR) return false;
+
+  for (let i = 0; i < 6; i++) {
+    const [dx, dy, dz] = NEIGHBOR_OFFSETS[i];
+    const nlx = lx + dx, nly = ly + dy, nlz = lz + dz;
+
+    if (nly < 0 || nly >= WORLD_HEIGHT) return true;
+
+    let neighbor;
+    if (nlx >= 0 && nlx < CHUNK_SIZE && nlz >= 0 && nlz < CHUNK_SIZE) {
+      neighbor = chunk.get(nlx, nly, nlz);
+    } else {
+      const ncx = chunk.cx + Math.floor(nlx / CHUNK_SIZE);
+      const ncz = chunk.cz + Math.floor(nlz / CHUNK_SIZE);
+      const wlx = ((nlx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+      const wlz = ((nlz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+      const nchunk = chunks.get(`${ncx},${ncz}`);
+      if (!nchunk) return true; // الجار غير محمّل = مكشوف
+      neighbor = nchunk.get(wlx, nly, wlz);
+    }
+    if (neighbor === AIR) return true;
+  }
+  return false;
 }
 
 const _m4 = new THREE.Matrix4();
 
 function rebuildChunk(chunk) {
-  for (const m of chunk.meshes) { scene.remove(m); m.dispose(); }
-  chunk.meshes = []; chunk.instanced = {};
+  for (const m of chunk.meshes) {
+    scene.remove(m);
+    m.dispose();
+  }
+  chunk.meshes = [];
 
   const groups = {};
-  for (let lx = 0; lx < CHUNK_SIZE; lx++)
-    for (let ly = 0; ly < WORLD_HEIGHT; ly++)
+  for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+    for (let ly = 0; ly < WORLD_HEIGHT; ly++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
         const t = chunk.get(lx, ly, lz);
         if (t === AIR) continue;
-        if (!isExposedInChunk(chunk, lx, ly, lz)) continue;
-        if (!groups[t]) groups[t] = [];
-        groups[t].push([lx, ly, lz]);
+        if (!isExposedAt(chunk, lx, ly, lz)) continue;
+        (groups[t] ||= []).push([lx, ly, lz]);
       }
+    }
+  }
 
-  const baseX = chunk.cx * CHUNK_SIZE, baseZ = chunk.cz * CHUNK_SIZE;
+  const baseX = chunk.cx * CHUNK_SIZE;
+  const baseZ = chunk.cz * CHUNK_SIZE;
+
   for (const tStr in groups) {
     const list = groups[tStr];
-    if (!materials[tStr]) continue;
     const mesh = new THREE.InstancedMesh(boxGeo, materials[tStr], list.length);
     mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
     for (let i = 0; i < list.length; i++) {
       const [lx, ly, lz] = list[i];
-      _m4.makeTranslation(baseX+lx+0.5, ly+0.5, baseZ+lz+0.5);
+      _m4.makeTranslation(baseX + lx + 0.5, ly + 0.5, baseZ + lz + 0.5);
       mesh.setMatrixAt(i, _m4);
     }
     mesh.instanceMatrix.needsUpdate = true;
-    mesh.frustumCulled = true;
+    // culling معطّل: نعتمد على مسافة الـrender distance
+    mesh.frustumCulled = false;
     scene.add(mesh);
     chunk.meshes.push(mesh);
-    chunk.instanced[tStr] = mesh;
   }
 }
 
-/* ==================== CHUNK MGMT ==================== */
-function rebuildChunkNeighbors(cx, cz) {
-  // ✅ إصلاح #3 (تكملة): عند تحميل قطعة جديدة، أعد بناء جيرانها
-  for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-    const nb = chunks.get(`${cx+dx},${cz+dz}`);
-    if (nb) rebuildChunk(nb);
-  }
-}
-
+// ============================================================
+//  CHUNK MANAGEMENT
+// ============================================================
 function requestChunksAround(px, pz) {
-  const pcx = Math.floor(px/CHUNK_SIZE), pcz = Math.floor(pz/CHUNK_SIZE);
+  const pcx = Math.floor(px / CHUNK_SIZE);
+  const pcz = Math.floor(pz / CHUNK_SIZE);
   const R = gameSettings.renderDistance;
-  for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
-    const cx = pcx+dx, cz = pcz+dz, key = `${cx},${cz}`;
-    if (chunks.has(key) || genQueue.some(q => q.key === key)) continue;
-    genQueue.push({ key, cx, cz });
+  const queued = new Set(genQueue.map(q => q.key));
+
+  for (let dx = -R; dx <= R; dx++) {
+    for (let dz = -R; dz <= R; dz++) {
+      const cx = pcx + dx, cz = pcz + dz;
+      const key = `${cx},${cz}`;
+      if (chunks.has(key) || queued.has(key)) continue;
+      genQueue.push({ key, cx, cz });
+      queued.add(key);
+    }
   }
+
   for (const [key, chunk] of chunks) {
-    if (Math.abs(chunk.cx-pcx) > R+1 || Math.abs(chunk.cz-pcz) > R+1) {
+    if (Math.abs(chunk.cx - pcx) > R + 1 || Math.abs(chunk.cz - pcz) > R + 1) {
       for (const m of chunk.meshes) { scene.remove(m); m.dispose(); }
       chunks.delete(key);
     }
   }
 }
+
 function processGenQueue(budgetMs) {
   if (genQueue.length === 0) return;
-  const pcx = Math.floor(player.pos.x/CHUNK_SIZE), pcz = Math.floor(player.pos.z/CHUNK_SIZE);
-  genQueue.sort((a,b) =>
-    Math.max(Math.abs(a.cx-pcx),Math.abs(a.cz-pcz)) - Math.max(Math.abs(b.cx-pcx),Math.abs(b.cz-pcz)));
+  const pcx = Math.floor(player.pos.x / CHUNK_SIZE);
+  const pcz = Math.floor(player.pos.z / CHUNK_SIZE);
+  genQueue.sort((a, b) => {
+    const da = Math.max(Math.abs(a.cx - pcx), Math.abs(a.cz - pcz));
+    const db = Math.max(Math.abs(b.cx - pcx), Math.abs(b.cz - pcz));
+    return da - db;
+  });
+
   const start = performance.now();
   while (genQueue.length > 0 && performance.now() - start < budgetMs) {
     const item = genQueue.shift();
     if (chunks.has(item.key)) continue;
     const chunk = new Chunk(item.cx, item.cz);
-    generateChunk(chunk); rebuildChunk(chunk);
+    generateChunk(chunk);
+    rebuildChunk(chunk);
     chunks.set(item.key, chunk);
-    rebuildChunkNeighbors(item.cx, item.cz);
+
+    // إعادة بناء الجيران لأن حدود الرؤية تغيّرت
+    rebuildChunkIfExists(item.cx - 1, item.cz);
+    rebuildChunkIfExists(item.cx + 1, item.cz);
+    rebuildChunkIfExists(item.cx, item.cz - 1);
+    rebuildChunkIfExists(item.cx, item.cz + 1);
   }
 }
+
 function forceGenerateChunk(cx, cz) {
   const key = `${cx},${cz}`;
   if (chunks.has(key)) return;
   const chunk = new Chunk(cx, cz);
-  generateChunk(chunk); rebuildChunk(chunk);
+  generateChunk(chunk);
+  rebuildChunk(chunk);
   chunks.set(key, chunk);
-  rebuildChunkNeighbors(cx, cz);
+  rebuildChunkIfExists(cx - 1, cz);
+  rebuildChunkIfExists(cx + 1, cz);
+  rebuildChunkIfExists(cx, cz - 1);
+  rebuildChunkIfExists(cx, cz + 1);
 }
 
-/* ==================== THREE SETUP ==================== */
+// ============================================================
+//  THREE.JS SETUP
+// ============================================================
 const scene = new THREE.Scene();
 const skyColorDay = new THREE.Color(0x88ccff);
 scene.background = skyColorDay.clone();
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 200);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
 camera.rotation.order = 'YXZ';
 
-const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance", precision: "mediump" });
+const renderer = new THREE.WebGLRenderer({
+  antialias: false, powerPreference: "high-performance", precision: "mediump"
+});
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.domElement.style.touchAction = 'none';
 document.body.appendChild(renderer.domElement);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.65));
 const sunLight = new THREE.DirectionalLight(0xfffaee, 0.9);
-sunLight.position.set(50, 80, 30);
-scene.add(sunLight);
+sunLight.position.set(50, 80, 30); scene.add(sunLight);
 const backLight = new THREE.DirectionalLight(0x88bbff, 0.25);
-backLight.position.set(-30, 20, -40);
-scene.add(backLight);
+backLight.position.set(-30, 20, -40); scene.add(backLight);
 
 function applyFog() {
   if (gameSettings.fog) {
     const dist = gameSettings.renderDistance * CHUNK_SIZE;
-    scene.fog = new THREE.Fog(skyColorDay, dist*0.55, dist*1.05);
+    scene.fog = new THREE.Fog(skyColorDay.clone(), dist * 0.55, dist * 1.05);
   } else scene.fog = null;
 }
 applyFog();
 
-/* ==================== COLLISION ==================== */
+// Highlight box
+const highlightMesh = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(1.005, 1.005, 1.005)),
+  new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 })
+);
+highlightMesh.visible = false;
+scene.add(highlightMesh);
+
+// ============================================================
+//  COLLISION
+// ============================================================
 function playerCollides(px, py, pz) {
-  const hw = PLAYER.width/2;
-  const x0=px-hw, x1=px+hw, y0=py, y1=py+PLAYER.height, z0=pz-hw, z1=pz+hw;
-  const bx0=Math.floor(x0), bx1=Math.floor(x1-0.0001);
-  const by0=Math.floor(y0), by1=Math.floor(y1-0.0001);
-  const bz0=Math.floor(z0), bz1=Math.floor(z1-0.0001);
-  for (let bx=bx0; bx<=bx1; bx++) for (let by=by0; by<=by1; by++) for (let bz=bz0; bz<=bz1; bz++) {
-    if (isSolid(getBlockAt(bx,by,bz))) {
-      if (x1>bx && x0<bx+1 && y1>by && y0<by+1 && z1>bz && z0<bz+1) return true;
-    }
-  }
+  const hw = PLAYER.width / 2;
+  const x0 = px - hw, x1 = px + hw;
+  const y0 = py, y1 = py + PLAYER.height;
+  const z0 = pz - hw, z1 = pz + hw;
+  const bx0 = Math.floor(x0), bx1 = Math.floor(x1 - 0.0001);
+  const by0 = Math.floor(y0), by1 = Math.floor(y1 - 0.0001);
+  const bz0 = Math.floor(z0), bz1 = Math.floor(z1 - 0.0001);
+
+  for (let bx = bx0; bx <= bx1; bx++)
+    for (let by = by0; by <= by1; by++)
+      for (let bz = bz0; bz <= bz1; bz++)
+        if (isSolid(getBlockAt(bx, by, bz))) return true;
   return false;
 }
+
 function blockWouldHitPlayer(bx, by, bz) {
-  const hw = PLAYER.width/2;
-  return (player.pos.x+hw>bx && player.pos.x-hw<bx+1 &&
-          player.pos.y+PLAYER.height>by && player.pos.y<by+1 &&
-          player.pos.z+hw>bz && player.pos.z-hw<bz+1);
+  const hw = PLAYER.width / 2;
+  return (player.pos.x + hw > bx && player.pos.x - hw < bx + 1 &&
+          player.pos.y + PLAYER.height > by && player.pos.y < by + 1 &&
+          player.pos.z + hw > bz && player.pos.z - hw < bz + 1);
 }
 
-/* ==================== PLAYER UPDATE ==================== */
+// ============================================================
+//  PHYSICS
+// ============================================================
 function updatePlayer(dt) {
   player.vel.y -= PLAYER.gravity * dt;
   if (player.vel.y < -30) player.vel.y = -30;
 
-  const fwd = (moveState.forward?1:0) - (moveState.backward?1:0);
-  const str = (moveState.right?1:0) - (moveState.left?1:0);
+  const fwd = (moveState.forward ? 1 : 0) - (moveState.backward ? 1 : 0);
+  const str = (moveState.right ? 1 : 0) - (moveState.left ? 1 : 0);
   const sinY = Math.sin(yaw), cosY = Math.cos(yaw);
-  const dx = -sinY*fwd + cosY*str;
-  const dz = -cosY*fwd - sinY*str;
+  const dx = -sinY * fwd + cosY * str;
+  const dz = -cosY * fwd - sinY * str;
   const len = Math.hypot(dx, dz);
-  const spd = PLAYER.baseSpeed * (gameSettings.moveSpeed/5);
-  if (len > 0) { player.vel.x = (dx/len)*spd; player.vel.z = (dz/len)*spd; }
-  else { player.vel.x = 0; player.vel.z = 0; }
+  const spd = PLAYER.baseSpeed * (gameSettings.moveSpeed / 5);
 
-  if (moveState.jump && player.onGround) { player.vel.y = PLAYER.jumpVel; player.onGround = false; }
+  if (len > 0) {
+    player.vel.x = (dx / len) * spd;
+    player.vel.z = (dz / len) * spd;
+  } else {
+    player.vel.x = 0; player.vel.z = 0;
+  }
 
-  const nx = player.pos.x + player.vel.x*dt;
-  if (!playerCollides(nx, player.pos.y, player.pos.z)) player.pos.x = nx; else player.vel.x = 0;
-  const nz = player.pos.z + player.vel.z*dt;
-  if (!playerCollides(player.pos.x, player.pos.y, nz)) player.pos.z = nz; else player.vel.z = 0;
+  if (moveState.jump && player.onGround) {
+    player.vel.y = PLAYER.jumpVel;
+    player.onGround = false;
+    playSound(520, 0.08, 'square', 0.08);
+  }
 
-  const ny = player.pos.y + player.vel.y*dt;
+  // X axis
+  const nx = player.pos.x + player.vel.x * dt;
+  if (!playerCollides(nx, player.pos.y, player.pos.z)) player.pos.x = nx;
+  else player.vel.x = 0;
+
+  // Z axis
+  const nz = player.pos.z + player.vel.z * dt;
+  if (!playerCollides(player.pos.x, player.pos.y, nz)) player.pos.z = nz;
+  else player.vel.z = 0;
+
+  // Y axis
+  const ny = player.pos.y + player.vel.y * dt;
   if (!playerCollides(player.pos.x, ny, player.pos.z)) {
     player.pos.y = ny;
-    if (player.vel.y < 0) player.onGround = false;
+    player.onGround = false;
   } else {
     if (player.vel.y < 0) {
-      player.pos.y = Math.ceil(player.pos.y);
+      player.pos.y = Math.floor(player.pos.y) + 1;
       let guard = 0;
-      while (playerCollides(player.pos.x, player.pos.y, player.pos.z) && guard++ < 5) player.pos.y += 0.05;
+      while (playerCollides(player.pos.x, player.pos.y, player.pos.z) && guard++ < 8) {
+        player.pos.y += 0.05;
+      }
       player.onGround = true;
     } else {
-      player.pos.y = Math.floor(player.pos.y + PLAYER.height) - PLAYER.height - 0.001;
+      // اصطدام بالسقف
+      const topOfHead = player.pos.y + PLAYER.height;
+      player.pos.y = Math.floor(topOfHead) - PLAYER.height - 0.001;
     }
     player.vel.y = 0;
   }
+
   if (!player.onGround && player.vel.y <= 0) {
-    if (playerCollides(player.pos.x, player.pos.y - 0.05, player.pos.z)) {
+    const probeY = player.pos.y - 0.05;
+    if (playerCollides(player.pos.x, probeY, player.pos.z)) {
       player.onGround = true;
-      player.pos.y = Math.ceil(player.pos.y);
+      player.pos.y = Math.ceil(player.pos.y - 0.001);
     }
   }
-  if (player.pos.y < -10) { player.pos.y = 30; player.vel.set(0,0,0); }
+
+  if (player.pos.y < -10) {
+    player.pos.y = 30; player.vel.set(0, 0, 0);
+    showToast("⚠️ سقطت! تم إرجاعك");
+  }
 }
 
-/* ==================== CAMERA ==================== */
+// ============================================================
+//  CAMERA
+// ============================================================
 function updateCamera() {
   const eyeY = player.pos.y + PLAYER.eye;
   if (cameraMode === 0) {
     camera.position.set(player.pos.x, eyeY, player.pos.z);
-    camera.rotation.y = yaw;
-    camera.rotation.x = pitch;
-    camera.rotation.z = 0;
+    camera.rotation.set(pitch, yaw, 0);
   } else {
-    // ✅ إصلاح #5: كاميرا الشخص الثالث تتبع اتجاه النظر بشكل صحيح
     const dist = 4.5;
-    const cosP = Math.cos(pitch);
-    const backX = Math.sin(yaw) * dist * cosP;
-    const backZ = Math.cos(yaw) * dist * cosP;
+    const backX = Math.sin(yaw) * Math.cos(pitch) * dist;
     const backY = Math.sin(pitch) * dist;
+    const backZ = Math.cos(yaw) * Math.cos(pitch) * dist;
     let cx = player.pos.x + backX;
-    let cy = eyeY - backY + 0.3;
+    let cy = eyeY + backY;
     let cz = player.pos.z + backZ;
+
     const origin = new THREE.Vector3(player.pos.x, eyeY, player.pos.z);
-    const dir = new THREE.Vector3(cx-origin.x, cy-origin.y, cz-origin.z);
+    const dir = new THREE.Vector3(cx - origin.x, cy - origin.y, cz - origin.z);
     const distFull = dir.length();
-    if (distFull > 0.001) {
-      dir.normalize();
-      const hit = raycastVoxel(origin, dir, distFull);
-      if (hit) {
-        const safe = Math.max(0.5, hit.dist - 0.3);
-        // ✅ إصلاح #6: إزالة الكود الميت `const t = safe / distFull`
-        cx = origin.x + dir.x * safe;
-        cy = origin.y + dir.y * safe;
-        cz = origin.z + dir.z * safe;
-      }
+    dir.normalize();
+    const hit = raycastVoxel(origin, dir, distFull);
+    if (hit) {
+      const safe = Math.max(0.5, hit.dist - 0.3);
+      cx = origin.x + dir.x * safe;
+      cy = origin.y + dir.y * safe;
+      cz = origin.z + dir.z * safe;
     }
     camera.position.set(cx, cy, cz);
     camera.lookAt(player.pos.x, eyeY, player.pos.z);
   }
 }
 
-/* ==================== RAYCAST ==================== */
+// ============================================================
+//  RAYCAST (DDA)
+// ============================================================
 function raycastVoxel(origin, dir, maxDist) {
-  let x = Math.floor(origin.x), y = Math.floor(origin.y), z = Math.floor(origin.z);
+  let x = Math.floor(origin.x);
+  let y = Math.floor(origin.y);
+  let z = Math.floor(origin.z);
+
   const stepX = dir.x > 0 ? 1 : -1;
   const stepY = dir.y > 0 ? 1 : -1;
   const stepZ = dir.z > 0 ? 1 : -1;
-  const tDeltaX = dir.x !== 0 ? Math.abs(1/dir.x) : Infinity;
-  const tDeltaY = dir.y !== 0 ? Math.abs(1/dir.y) : Infinity;
-  const tDeltaZ = dir.z !== 0 ? Math.abs(1/dir.z) : Infinity;
-  let tMaxX = dir.x !== 0 ? Math.abs((x + (stepX>0?1:0) - origin.x)/dir.x) : Infinity;
-  let tMaxY = dir.y !== 0 ? Math.abs((y + (stepY>0?1:0) - origin.y)/dir.y) : Infinity;
-  let tMaxZ = dir.z !== 0 ? Math.abs((z + (stepZ>0?1:0) - origin.z)/dir.z) : Infinity;
+  const tDeltaX = dir.x !== 0 ? Math.abs(1 / dir.x) : Infinity;
+  const tDeltaY = dir.y !== 0 ? Math.abs(1 / dir.y) : Infinity;
+  const tDeltaZ = dir.z !== 0 ? Math.abs(1 / dir.z) : Infinity;
+  let tMaxX = dir.x !== 0 ? Math.abs((x + (stepX > 0 ? 1 : 0) - origin.x) / dir.x) : Infinity;
+  let tMaxY = dir.y !== 0 ? Math.abs((y + (stepY > 0 ? 1 : 0) - origin.y) / dir.y) : Infinity;
+  let tMaxZ = dir.z !== 0 ? Math.abs((z + (stepZ > 0 ? 1 : 0) - origin.z) / dir.z) : Infinity;
+
   let nx = 0, ny = 0, nz = 0, t = 0;
   while (t < maxDist) {
     if (isSolid(getBlockAt(x, y, z))) {
-      return { x, y, z, nx, ny, nz,
-        px: origin.x+dir.x*t, py: origin.y+dir.y*t, pz: origin.z+dir.z*t, dist: t };
+      return { x, y, z, nx, ny, nz, dist: t };
     }
-    if (tMaxX < tMaxY && tMaxX < tMaxZ) { x += stepX; t = tMaxX; tMaxX += tDeltaX; nx=-stepX; ny=0; nz=0; }
-    else if (tMaxY < tMaxZ) { y += stepY; t = tMaxY; tMaxY += tDeltaY; nx=0; ny=-stepY; nz=0; }
-    else { z += stepZ; t = tMaxZ; tMaxZ += tDeltaZ; nx=0; ny=0; nz=-stepZ; }
+    if (tMaxX < tMaxY && tMaxX < tMaxZ) {
+      x += stepX; t = tMaxX; tMaxX += tDeltaX; nx = -stepX; ny = 0; nz = 0;
+    } else if (tMaxY < tMaxZ) {
+      y += stepY; t = tMaxY; tMaxY += tDeltaY; nx = 0; ny = -stepY; nz = 0;
+    } else {
+      z += stepZ; t = tMaxZ; tMaxZ += tDeltaZ; nx = 0; ny = 0; nz = -stepZ;
+    }
   }
   return null;
 }
 
-/* ==================== INTERACTION ==================== */
+// ============================================================
+//  INTERACTION
+// ============================================================
 function breakBlock() {
   if (!isGameStarted || isPaused()) return;
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
   const hit = raycastVoxel(camera.position, dir, 6);
   if (!hit) { showToast("لا يوجد مكعب أمامك"); return; }
-  // ✅ إصلاح #7: bedrock لا يُكسر
-  if (getBlockAt(hit.x, hit.y, hit.z) === BLOCK.BEDROCK) {
-    showToast("⛔ هذه طبقة أساسية لا تُكسر");
-    return;
+  if (hit.y <= 0) { showToast("لا يمكن كسر أرضية العالم"); return; }
+  if (setBlockAt(hit.x, hit.y, hit.z, AIR)) {
+    playSound(180, 0.12, 'sawtooth', 0.14);
+    showToast("⛏ تم كسر المكعب");
   }
-  setBlockAt(hit.x, hit.y, hit.z, AIR);
-  showToast("⛏ تم كسر المكعب");
 }
+
 function buildBlock() {
   if (!isGameStarted || isPaused()) return;
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
   const hit = raycastVoxel(camera.position, dir, 6);
-  if (!hit) return;
+  if (!hit) { showToast("لا يوجد مكان للبناء"); return; }
   const bx = hit.x + hit.nx, by = hit.y + hit.ny, bz = hit.z + hit.nz;
   if (by < 0 || by >= WORLD_HEIGHT) return;
   if (getBlockAt(bx, by, bz) !== AIR) return;
   if (blockWouldHitPlayer(bx, by, bz)) { showToast("لا يمكن البناء داخل نفسك"); return; }
-  if (setBlockAt(bx, by, bz, selectedBlockType)) showToast("🧱 تم البناء");
+  if (setBlockAt(bx, by, bz, selectedBlockType)) {
+    playSound(600, 0.1, 'triangle', 0.12);
+    showToast("🧱 تم البناء");
+  }
 }
 
-/* ==================== STATE HELPERS ==================== */
-function isPaused() {
-  return !pauseMenu.classList.contains("hidden") ||
-         !settingsMenu.classList.contains("hidden") ||
-         !mainMenu.classList.contains("hidden");
+// ============================================================
+//  SAVE / LOAD
+// ============================================================
+function saveSettings() {
+  try { localStorage.setItem(SAVE_KEY_SETTINGS, JSON.stringify(gameSettings)); } catch (e) {}
 }
-function resetMovement() {
-  moveState.forward = 0; moveState.backward = 0;
-  moveState.left = 0; moveState.right = 0; moveState.jump = false;
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY_SETTINGS);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (typeof s.sensitivity === 'number') gameSettings.sensitivity = s.sensitivity;
+    if (typeof s.moveSpeed === 'number') gameSettings.moveSpeed = s.moveSpeed;
+    if (typeof s.renderDistance === 'number') gameSettings.renderDistance = s.renderDistance;
+    if (typeof s.quality === 'number') gameSettings.quality = s.quality;
+    if (typeof s.fog === 'boolean') gameSettings.fog = s.fog;
+    if (typeof s.showFps === 'boolean') gameSettings.showFps = s.showFps;
+    if (typeof s.volume === 'number') gameSettings.volume = s.volume;
+  } catch (e) {}
 }
 
 function saveWorld() {
@@ -471,20 +990,21 @@ function saveWorld() {
       for (const [bkey, t] of m) obj[bkey] = t;
       mods[ckey] = obj;
     }
-    localStorage.setItem("IMADCRAFT_SAVE_V2", JSON.stringify({
-      version: 2,
+    const data = {
+      version: 3,
       player: { x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw, pitch },
-      selected: selectedBlockType, mods, settings: { ...gameSettings }
-    }));
-    hasUnsavedChanges = false;
+      selected: selectedBlockType,
+      mods,
+    };
+    localStorage.setItem(SAVE_KEY_WORLD, JSON.stringify(data));
     showToast("💾 تم حفظ العالم");
+    playSound(800, 0.1, 'sine', 0.1);
   } catch (e) { showToast("تعذر الحفظ"); }
 }
 
-// ✅ إصلاح #1 و #2: لا يوجد forceGenerateChunk قبل loadWorld، وتُطبَّق التعديلات على القطع الموجودة
 function loadWorld() {
   try {
-    const raw = localStorage.getItem("IMADCRAFT_SAVE_V2");
+    const raw = localStorage.getItem(SAVE_KEY_WORLD);
     if (!raw) return false;
     const data = JSON.parse(raw);
     if (data.player) {
@@ -501,91 +1021,72 @@ function loadWorld() {
         chunkMods.set(ckey, m);
       }
     }
-    // ✅ إصلاح #2: طبّق التعديلات على القطع الموجودة مسبقاً
-    for (const [ckey, mods] of chunkMods) {
-      const chunk = chunks.get(ckey);
-      if (chunk) {
-        for (const [bkey, t] of mods) {
-          const [lx, ly, lz] = bkey.split(',').map(Number);
-          chunk.set(lx, ly, lz, t);
-        }
-        rebuildChunk(chunk);
-      }
-    }
     return true;
   } catch (e) { return false; }
 }
 
-function isTouchDevice() {
-  return ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
-}
-
-/* ==================== UI ELEMENTS ==================== */
-const mainMenu     = document.getElementById("main-menu");
+// ============================================================
+//  UI ELEMENTS
+// ============================================================
+const mainMenu = document.getElementById("main-menu");
 const settingsMenu = document.getElementById("settings-menu");
-const pauseMenu    = document.getElementById("pause-menu");
-const btnCamera    = document.getElementById("btn-camera");
-const btnPause     = document.getElementById("btn-pause");
-const btnSave      = document.getElementById("btn-save");
+const pauseMenu = document.getElementById("pause-menu");
+const btnCamera = document.getElementById("btn-camera");
 
-/* ==================== START GAME ==================== */
-function startGame() {
-  mainMenu.classList.add("hidden");
-  settingsMenu.classList.add("hidden");
-  pauseMenu.classList.add("hidden");
-  isGameStarted = true;
+let settingsReturnTo = "main";
 
-  const loaded = loadWorld();
-
-  const pcx = Math.floor(player.pos.x / CHUNK_SIZE);
-  const pcz = Math.floor(player.pos.z / CHUNK_SIZE);
-  for (let dx = -1; dx <= 1; dx++)
-    for (let dz = -1; dz <= 1; dz++)
-      forceGenerateChunk(pcx + dx, pcz + dz);
-
-  requestChunksAround(player.pos.x, player.pos.z);
-
-  if (!loaded) {
-    const bx = Math.floor(player.pos.x), bz = Math.floor(player.pos.z);
-    let y = WORLD_HEIGHT - 1;
-    while (y > 0 && !isSolid(getBlockAt(bx, y, bz))) y--;
-    player.pos.y = y + 1.05;
-    player.vel.set(0, 0, 0);
-  }
-
-  if (!isTouchDevice()) {
-    try { renderer.domElement.requestPointerLock(); } catch (e) {}
-  }
-
-  showToast(loaded ? "✅ تم تحميل العالم" : "🌍 عالم جديد");
+function isPaused() {
+  return !pauseMenu.classList.contains("hidden") ||
+         !settingsMenu.classList.contains("hidden") ||
+         !mainMenu.classList.contains("hidden");
 }
 
-/* ==================== MENU HANDLERS ==================== */
+function syncSettingsUI() {
+  document.getElementById("setting-sens").value = gameSettings.sensitivity;
+  document.getElementById("val-sens").textContent = gameSettings.sensitivity;
+  document.getElementById("setting-speed").value = gameSettings.moveSpeed;
+  document.getElementById("val-speed").textContent = gameSettings.moveSpeed;
+  document.getElementById("setting-render").value = gameSettings.renderDistance;
+  document.getElementById("val-render").textContent = gameSettings.renderDistance;
+  document.getElementById("setting-quality").value = gameSettings.quality;
+  document.getElementById("val-quality").textContent = gameSettings.quality + "%";
+  document.getElementById("setting-fog").checked = gameSettings.fog;
+  document.getElementById("setting-fps").checked = gameSettings.showFps;
+  document.getElementById("setting-volume").value = gameSettings.volume;
+  document.getElementById("val-volume").textContent = gameSettings.volume;
+}
+
+function applyQuality() {
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5) * (gameSettings.quality / 100));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// --- Menu Handlers ---
 document.getElementById("menu-start").addEventListener("click", startGame);
 
 document.getElementById("menu-settings").addEventListener("click", () => {
   settingsReturnTo = "main";
   mainMenu.classList.add("hidden");
-  pauseMenu.classList.add("hidden");
   settingsMenu.classList.remove("hidden");
+  syncSettingsUI();
 });
 
 document.getElementById("settings-back").addEventListener("click", () => {
   settingsMenu.classList.add("hidden");
   if (settingsReturnTo === "pause" && isGameStarted) pauseMenu.classList.remove("hidden");
   else mainMenu.classList.remove("hidden");
+  saveSettings();
 });
 
-btnPause.addEventListener("click", () => {
+document.getElementById("btn-pause").addEventListener("click", () => {
   if (!isGameStarted) { showToast("ابدأ اللعبة أولاً"); return; }
-  resetMovement();
-  if (document.pointerLockElement) document.exitPointerLock();
   pauseMenu.classList.remove("hidden");
+  exitPointerLockSafe();
 });
 
 document.getElementById("pause-resume").addEventListener("click", () => {
   pauseMenu.classList.add("hidden");
-  if (!isTouchDevice()) {
+  if (renderer.domElement.requestPointerLock && !isTouchDevice()) {
     try { renderer.domElement.requestPointerLock(); } catch (e) {}
   }
 });
@@ -594,110 +1095,140 @@ document.getElementById("pause-settings").addEventListener("click", () => {
   settingsReturnTo = "pause";
   pauseMenu.classList.add("hidden");
   settingsMenu.classList.remove("hidden");
+  syncSettingsUI();
 });
 
 document.getElementById("pause-save").addEventListener("click", saveWorld);
 
 document.getElementById("pause-exit").addEventListener("click", () => {
-  if (hasUnsavedChanges && !confirm("لديك تعديلات غير محفوظة. هل تريد الخروج بدون حفظ؟")) return;
   pauseMenu.classList.add("hidden");
-  settingsMenu.classList.add("hidden");
   mainMenu.classList.remove("hidden");
   isGameStarted = false;
-  resetMovement();
-  if (document.pointerLockElement) document.exitPointerLock();
+  resetMoveState();
+  exitPointerLockSafe();
 });
 
-btnSave.addEventListener("click", saveWorld);
+document.getElementById("btn-save").addEventListener("click", saveWorld);
 
 btnCamera.addEventListener("click", () => {
   cameraMode = (cameraMode + 1) % 2;
   btnCamera.textContent = cameraMode === 0 ? "👤 منظور 1" : "👤 منظور 3";
-  showToast(cameraMode === 0 ? "كاميرا: الشخص الأول" : "كاميرا: الشخص الثالث");
 });
 
-/* ==================== HOTBAR ==================== */
+// --- Hotbar ---
 const hotbarSlots = document.querySelectorAll('.hotbar-slot');
 function selectBlockType(t) {
   selectedBlockType = t;
-  hotbarSlots.forEach(s => s.classList.toggle('active', parseInt(s.getAttribute('data-type')) === t));
+  hotbarSlots.forEach(s => {
+    s.classList.toggle('active', parseInt(s.getAttribute('data-type')) === t);
+  });
 }
 hotbarSlots.forEach(slot => {
   slot.addEventListener('click', () => selectBlockType(parseInt(slot.getAttribute('data-type'))));
 });
 
-/* ==================== SETTINGS ==================== */
-const settingVolume = document.getElementById("setting-volume");
-const settingFog = document.getElementById("setting-fog");
-const settingFullscreen = document.getElementById("setting-fullscreen");
-const settingSens = document.getElementById("setting-sens");
-const settingSpeed = document.getElementById("setting-speed");
-const settingRender = document.getElementById("setting-render");
-const settingQuality = document.getElementById("setting-quality");
-const settingFps = document.getElementById("setting-fps");
+// Wheel to cycle hotbar
+window.addEventListener('wheel', (e) => {
+  if (!isGameStarted || isPaused()) return;
+  if (document.pointerLockElement !== renderer.domElement) return;
+  e.preventDefault();
+  const t = (selectedBlockType + (e.deltaY > 0 ? 1 : -1) + 8) % 8;
+  selectBlockType(t);
+}, { passive: false });
 
-settingVolume.addEventListener("input", e => {
-  gameSettings.volume = +e.target.value;
-  document.getElementById("val-volume").textContent = gameSettings.volume;
-});
-settingSens.addEventListener("input", e => {
-  gameSettings.sensitivity = +e.target.value;
+// --- Settings Handlers ---
+function bindSetting(id, onChange) {
+  document.getElementById(id).addEventListener("input", e => {
+    onChange(e.target);
+    saveSettings();
+  });
+}
+bindSetting("setting-sens", el => {
+  gameSettings.sensitivity = +el.value;
   document.getElementById("val-sens").textContent = gameSettings.sensitivity;
 });
-settingSpeed.addEventListener("input", e => {
-  gameSettings.moveSpeed = +e.target.value;
+bindSetting("setting-speed", el => {
+  gameSettings.moveSpeed = +el.value;
   document.getElementById("val-speed").textContent = gameSettings.moveSpeed;
 });
-settingRender.addEventListener("input", e => {
-  gameSettings.renderDistance = +e.target.value;
+bindSetting("setting-render", el => {
+  gameSettings.renderDistance = +el.value;
   document.getElementById("val-render").textContent = gameSettings.renderDistance;
   applyFog();
-  requestChunksAround(player.pos.x, player.pos.z);
+  if (isGameStarted) requestChunksAround(player.pos.x, player.pos.z);
 });
-settingQuality.addEventListener("input", e => {
-  gameSettings.quality = +e.target.value;
+bindSetting("setting-quality", el => {
+  gameSettings.quality = +el.value;
   document.getElementById("val-quality").textContent = gameSettings.quality + "%";
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5) * (gameSettings.quality/100));
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  applyQuality();
 });
-settingFog.addEventListener("change", e => {
-  gameSettings.fog = e.target.checked;
-  applyFog();
+bindSetting("setting-volume", el => {
+  gameSettings.volume = +el.value;
+  document.getElementById("val-volume").textContent = gameSettings.volume;
 });
-settingFps.addEventListener("change", e => {
-  gameSettings.showFps = e.target.checked;
-  document.getElementById("hud-fps").style.display = gameSettings.showFps ? "" : "none";
+document.getElementById("setting-fog").addEventListener("change", e => {
+  gameSettings.fog = e.target.checked; applyFog(); saveSettings();
 });
-settingFullscreen.addEventListener("change", e => {
-  if (e.target.checked) { if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen(); }
-  else { if (document.exitFullscreen) document.exitFullscreen(); }
+document.getElementById("setting-fps").addEventListener("change", e => {
+  gameSettings.showFps = e.target.checked; saveSettings();
+});
+document.getElementById("setting-fullscreen").addEventListener("change", e => {
+  if (e.target.checked) {
+    if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{});
+  } else {
+    if (document.exitFullscreen && document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+  }
 });
 
-/* ==================== KEYBOARD ==================== */
+// ============================================================
+//  INPUT
+// ============================================================
+function isTouchDevice() {
+  return ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
+}
+function resetMoveState() {
+  moveState.forward = moveState.backward = moveState.left = moveState.right = 0;
+  moveState.jump = false;
+}
+function exitPointerLockSafe() {
+  ignorePointerlockChange = true;
+  if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (e) {} }
+  setTimeout(() => { ignorePointerlockChange = false; }, 150);
+}
+
+document.addEventListener("pointerlockchange", () => {
+  if (ignorePointerlockChange) return;
+  if (isGameStarted && !isTouchDevice() && !document.pointerLockElement) {
+    if (pauseMenu.classList.contains("hidden") && settingsMenu.classList.contains("hidden")) {
+      pauseMenu.classList.remove("hidden");
+    }
+  }
+});
+
+window.addEventListener("blur", resetMoveState);
+document.addEventListener("visibilitychange", () => { if (document.hidden) resetMoveState(); });
+
 document.addEventListener("keydown", e => {
   if (!isGameStarted) return;
+  if (e.target.tagName === 'INPUT') return;
   switch (e.code) {
     case "KeyW": case "ArrowUp": moveState.forward = 1; break;
     case "KeyS": case "ArrowDown": moveState.backward = 1; break;
     case "KeyA": case "ArrowLeft": moveState.left = 1; break;
     case "KeyD": case "ArrowRight": moveState.right = 1; break;
-    case "Space": moveState.jump = true; break;
+    case "Space": moveState.jump = true; e.preventDefault(); break;
     case "Escape":
       if (!pauseMenu.classList.contains("hidden")) document.getElementById("pause-resume").click();
       else if (!settingsMenu.classList.contains("hidden")) document.getElementById("settings-back").click();
-      else btnPause.click();
+      else document.getElementById("btn-pause").click();
       break;
-    case "Digit1": selectBlockType(0); break;
-    case "Digit2": selectBlockType(1); break;
-    case "Digit3": selectBlockType(2); break;
-    case "Digit4": selectBlockType(3); break;
-    case "Digit5": selectBlockType(4); break;
-    case "Digit6": selectBlockType(5); break;
-    case "Digit7": selectBlockType(6); break;
-    case "Digit8": selectBlockType(7); break;
+    case "Digit1": case "Digit2": case "Digit3": case "Digit4":
+    case "Digit5": case "Digit6": case "Digit7": case "Digit8":
+      selectBlockType(parseInt(e.code.replace("Digit", "")) - 1); break;
     case "KeyF": btnCamera.click(); break;
   }
 });
+
 document.addEventListener("keyup", e => {
   switch (e.code) {
     case "KeyW": case "ArrowUp": moveState.forward = 0; break;
@@ -708,7 +1239,7 @@ document.addEventListener("keyup", e => {
   }
 });
 
-/* ==================== MOUSE / TOUCH LOOK ==================== */
+// --- Mouse / Touch look ---
 let lookPointerId = null;
 let lastTouchX = 0, lastTouchY = 0;
 
@@ -723,20 +1254,22 @@ renderer.domElement.addEventListener("pointerdown", e => {
     lastTouchX = e.clientX; lastTouchY = e.clientY;
   }
 });
+
 window.addEventListener("pointermove", e => {
   if (e.pointerType === "mouse" && document.pointerLockElement === renderer.domElement) {
     const s = 0.0022 * (gameSettings.sensitivity / 5);
     yaw -= e.movementX * s;
     pitch -= e.movementY * s;
-    pitch = clamp(pitch, -Math.PI/2 + 0.02, Math.PI/2 - 0.02);
+    pitch = clamp(pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
   } else if (e.pointerId === lookPointerId) {
     const dx = e.clientX - lastTouchX, dy = e.clientY - lastTouchY;
     const s = 0.005 * (gameSettings.sensitivity / 5);
     yaw -= dx * s; pitch -= dy * s;
-    pitch = clamp(pitch, -Math.PI/2 + 0.02, Math.PI/2 - 0.02);
+    pitch = clamp(pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
     lastTouchX = e.clientX; lastTouchY = e.clientY;
   }
 });
+
 window.addEventListener("pointerup", e => { if (e.pointerId === lookPointerId) lookPointerId = null; });
 window.addEventListener("pointercancel", e => { if (e.pointerId === lookPointerId) lookPointerId = null; });
 
@@ -751,12 +1284,12 @@ renderer.domElement.addEventListener("mousedown", e => {
 });
 renderer.domElement.addEventListener("contextmenu", e => e.preventDefault());
 
-/* ==================== VIRTUAL CONTROLS ==================== */
+// --- Virtual controls ---
 function bindHold(el, onDown, onUp) {
   el.addEventListener("pointerdown", e => { e.preventDefault(); onDown(); });
   el.addEventListener("pointerup", e => { e.preventDefault(); onUp && onUp(); });
-  el.addEventListener("pointerleave", () => onUp && onUp());
-  el.addEventListener("pointercancel", () => onUp && onUp());
+  el.addEventListener("pointerleave", () => { onUp && onUp(); });
+  el.addEventListener("pointercancel", () => { onUp && onUp(); });
 }
 bindHold(document.getElementById("btn-up"),    () => moveState.forward = 1,  () => moveState.forward = 0);
 bindHold(document.getElementById("btn-down"),  () => moveState.backward = 1, () => moveState.backward = 0);
@@ -766,31 +1299,81 @@ bindHold(document.getElementById("btn-jump"),  () => moveState.jump = true,  () 
 document.getElementById("btn-break").addEventListener("click", breakBlock);
 document.getElementById("btn-build").addEventListener("click", buildBlock);
 
-/* ==================== AUTO-PAUSE & WARN ==================== */
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden && isGameStarted &&
-      pauseMenu.classList.contains("hidden") &&
-      settingsMenu.classList.contains("hidden")) {
-    resetMovement();
-    if (document.pointerLockElement) document.exitPointerLock();
-    pauseMenu.classList.remove("hidden");
+// ============================================================
+//  START GAME
+// ============================================================
+function findSafeSpawnY(x, z) {
+  const bx = Math.floor(x), bz = Math.floor(z);
+  for (let y = WORLD_HEIGHT - 1; y > 0; y--) {
+    if (isSolid(getBlockAt(bx, y, bz))) return y + 1.05;
   }
-});
-window.addEventListener("beforeunload", e => {
-  if (hasUnsavedChanges) { e.preventDefault(); e.returnValue = ""; }
-});
+  return 20;
+}
 
-/* ==================== RESIZE ==================== */
+function startGame() {
+  mainMenu.classList.add("hidden");
+  pauseMenu.classList.add("hidden");
+  settingsMenu.classList.add("hidden");
+  isGameStarted = true;
+
+  const loaded = loadWorld();
+
+  // ضمان تحميل المنطقة حول اللاعب قبل قياس الارتفاع
+  const pcx = Math.floor(player.pos.x / CHUNK_SIZE);
+  const pcz = Math.floor(player.pos.z / CHUNK_SIZE);
+  for (let dx = -2; dx <= 2; dx++)
+    for (let dz = -2; dz <= 2; dz++)
+      forceGenerateChunk(pcx + dx, pcz + dz);
+
+  if (!loaded) {
+    player.pos.y = findSafeSpawnY(player.pos.x, player.pos.z);
+    player.vel.set(0, 0, 0);
+    player.onGround = false;
+  }
+
+  requestChunksAround(player.pos.x, player.pos.z);
+  selectBlockType(selectedBlockType);
+
+  if (!isTouchDevice()) {
+    try { renderer.domElement.requestPointerLock(); } catch (e) {}
+  }
+
+  showToast(loaded ? "✅ تم تحميل العالم" : "🌍 عالم جديد");
+}
+
+// ============================================================
+//  RESIZE
+// ============================================================
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-/* ==================== MAIN LOOP ==================== */
+// ============================================================
+//  HUD visibility
+// ============================================================
+const crosshairEl = document.getElementById("crosshair");
+const hudTopEl = document.getElementById("hud-top");
+const controlsLayerEl = document.getElementById("controls-layer");
+const hotbarEl = document.getElementById("hotbar-container");
+
+function updateHudVisibility() {
+  const show = isGameStarted && !isPaused();
+  const disp = show ? '' : 'none';
+  crosshairEl.style.display = disp;
+  hudTopEl.style.display = disp;
+  controlsLayerEl.style.display = disp;
+  hotbarEl.style.display = disp;
+}
+
+// ============================================================
+//  MAIN LOOP
+// ============================================================
 const clock = new THREE.Clock();
-let frames = 0, lastFpsTime = 0;
+let frames = 0, lastFpsTime = 0, currentFps = 0;
 let lastChunkX = null, lastChunkZ = null;
+
 const fpsEl = document.getElementById("hud-fps");
 const coordsEl = document.getElementById("hud-coords");
 const chunksEl = document.getElementById("hud-chunks");
@@ -802,6 +1385,7 @@ function animate() {
 
   if (isGameStarted && !paused) {
     updatePlayer(dt);
+
     const pcx = Math.floor(player.pos.x / CHUNK_SIZE);
     const pcz = Math.floor(player.pos.z / CHUNK_SIZE);
     if (pcx !== lastChunkX || pcz !== lastChunkZ) {
@@ -814,25 +1398,56 @@ function animate() {
   }
 
   updateCamera();
+  updateHudVisibility();
+
+  // Highlight (perspective 1 only)
+  if (isGameStarted && !paused && cameraMode === 0) {
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    const hit = raycastVoxel(camera.position, dir, 6);
+    if (hit) {
+      highlightMesh.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+      highlightMesh.visible = true;
+    } else highlightMesh.visible = false;
+  } else highlightMesh.visible = false;
+
   renderer.render(scene, camera);
 
   frames++;
   const now = performance.now();
   if (now - lastFpsTime >= 500) {
-    const fps = Math.round((frames * 1000) / (now - lastFpsTime));
+    currentFps = Math.round((frames * 1000) / (now - lastFpsTime));
     frames = 0; lastFpsTime = now;
-    if (gameSettings.showFps) fpsEl.textContent = `FPS: ${fps}`;
+    if (gameSettings.showFps) fpsEl.textContent = `FPS: ${currentFps}`;
+    else fpsEl.textContent = `FPS: --`;
     coordsEl.textContent = `XYZ: ${player.pos.x.toFixed(1)} ${player.pos.y.toFixed(1)} ${player.pos.z.toFixed(1)}`;
     chunksEl.textContent = `Chunks: ${chunks.size}`;
   }
 }
 
-/* ==================== BOOT ==================== */
-if (!window.THREE) { alert("تعذر تحميل Three.js"); return; }
-// ✅ إصلاح #1: تم إزالة forceGenerateChunk قبل loadWorld
-// التوليد يحدث الآن داخل startGame بعد loadWorld
+// ============================================================
+//  BOOT
+// ============================================================
+if (!window.THREE) {
+  document.body.innerHTML = '<div style="color:#fff;padding:40px;text-align:center;font-size:1.2rem;">تعذر تحميل Three.js. تحقق من اتصال الإنترنت.</div>';
+  return;
+}
+
+loadSettings();
+syncSettingsUI();
+applyQuality();
+
+// خلفية القائمة الرئيسية
+forceGenerateChunk(0, 0);
+forceGenerateChunk(0, 1);
+forceGenerateChunk(1, 0);
+forceGenerateChunk(1, 1);
+forceGenerateChunk(-1, 0);
+forceGenerateChunk(0, -1);
 updateCamera();
 animate();
 
 })();
-  </script>
+</script>
+</body>
+  </html>
